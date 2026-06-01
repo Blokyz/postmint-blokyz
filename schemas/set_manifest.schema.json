@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://postmint.local/schemas/set_manifest.schema.json",
+  "title": "Frozen Set Manifest (Atlas)",
+  "type": "object",
+  "required": ["atlas_manifest_id", "ranking_manifest_id", "tier_structure", "tiers"],
+  "properties": {
+    "atlas_manifest_id": { "type": "string", "format": "uuid" },
+    "ranking_manifest_id": { "type": "string" },
+    "tier_structure": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["cap", "holding_window_hours"],
+        "properties": {
+          "cap": { "type": "integer", "minimum": 1 },
+          "holding_window_hours": { "type": "number", "minimum": 0 }
+        }
+      }
+    },
+    "tiers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["tier", "set_rule"],
+        "properties": {
+          "tier": {
+            "enum": [
+              "Common",
+              "Uncommon",
+              "Rare",
+              "Super Rare",
+              "Ultra Rare",
+              "Legendary",
+              "Mythic",
+              "Secret"
+            ]
+          },
+          "set_rule": { "type": "object" }
+        }
+      }
+    }
+  }
+}

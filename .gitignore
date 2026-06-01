@@ -1,0 +1,52 @@
+# Env
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+
+# Foundry
+contracts/cache/
+contracts/out/
+contracts/broadcast/
+contracts/lib/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Data / manifests (local runs)
+backend/data/manifests/
+backend/output/
+*.log
+
+
+CLAUDE.md
+IMPLEMENTATION.md
+PLAN.md
+TECHNICAL_DESIGN.md
+
+# Claude Code memory / session files
+.claude/
+
+# Graphify generated output
+graphify-out/

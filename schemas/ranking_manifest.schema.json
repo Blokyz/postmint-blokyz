@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://postmint.local/schemas/ranking_manifest.schema.json",
+  "title": "Approved Ranking Manifest",
+  "type": "object",
+  "required": ["manifest_id", "schema_version", "collection", "trait_rankings"],
+  "properties": {
+    "manifest_id": { "type": "string", "format": "uuid" },
+    "schema_version": { "const": "1.0" },
+    "collection": {
+      "type": "object",
+      "required": ["contract_address", "chain", "total_supply"],
+      "properties": {
+        "contract_address": { "type": "string", "pattern": "^0x[a-fA-F0-9]{40}$" },
+        "chain": { "type": "string" },
+        "total_supply": { "type": "integer", "minimum": 1 },
+        "eligible_supply": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "trait_rankings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rank", "trait_category", "trait_value", "combined_score"],
+        "properties": {
+          "rank": { "type": "integer", "minimum": 1 },
+          "trait_category": { "type": "string" },
+          "trait_value": { "type": "string" },
+          "combined_score": { "type": "number" },
+          "pinned": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

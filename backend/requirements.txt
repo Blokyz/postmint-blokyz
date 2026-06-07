@@ -9,6 +9,8 @@ httpx>=0.28.0
 python-dotenv>=1.0.1
 pandas>=2.2.0
 numpy>=1.26.0
+statsmodels>=0.14.0
+scikit-learn>=1.4.0
 celery[redis]>=5.4.0
 
 # testing

@@ -3,7 +3,7 @@
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.db.models import Trait, Token
+from app.db.models import Sale, Trait, Token
 
 
 def upsert_tokens(db: Session, tokens: list[dict]) -> None:
@@ -21,9 +21,25 @@ def upsert_tokens(db: Session, tokens: list[dict]) -> None:
     db.commit()
 
 
+def upsert_sales(db: Session, sales: list[dict]) -> None:
+    if not sales:
+        return
+    stmt = insert(Sale).values(sales)
+    stmt = stmt.on_conflict_do_nothing()
+    db.execute(stmt)
+    db.commit()
+
+
 def upsert_traits(db: Session, traits: list[dict]) -> None:
     if not traits:
         return
+    # Moralis can return duplicate trait_category entries for the same token.
+    # ON CONFLICT DO UPDATE raises CardinalityViolation if two rows in the same
+    # batch share the same conflict key, so deduplicate before inserting.
+    seen: dict[tuple, dict] = {}
+    for t in traits:
+        seen[(t["contract_address"], t["token_id"], t["trait_category"])] = t
+    traits = list(seen.values())
     stmt = insert(Trait).values(traits)
     stmt = stmt.on_conflict_do_update(
         index_elements=["contract_address", "token_id", "trait_category"],

@@ -3,6 +3,7 @@
 import json
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 import httpx
 from httpx import HTTPStatusError, TransportError
@@ -159,6 +160,101 @@ def fetch_nft_page(
     return NftPage(
         tokens=tokens,
         traits=traits,
+        next_cursor=data.get("cursor") or None,
+        total=int(data.get("total") or 0),
+    )
+
+
+@dataclass
+class SalesPage:
+    sales: list[dict] = field(default_factory=list)
+    next_cursor: str | None = None
+    total: int = 0
+
+
+def fetch_sales_page(
+    contract: str,
+    chain: str,
+    api_key: str,
+    cursor: str | None = None,
+) -> SalesPage:
+    params: dict[str, object] = {
+        "chain": _normalize_chain(chain),
+        "limit": PAGE_SIZE,
+    }
+    if cursor:
+        params["cursor"] = cursor
+
+    _timeout = httpx.Timeout(connect=15.0, read=60.0, write=10.0, pool=5.0)
+    for attempt in range(3):
+        try:
+            resp = httpx.get(
+                f"{MORALIS_BASE}/nft/{contract}/trades",
+                params=params,
+                headers={"X-API-Key": api_key},
+                timeout=_timeout,
+            )
+            resp.raise_for_status()
+            break
+        except (TransportError, httpx.TimeoutException) as exc:
+            if attempt == 2:
+                raise
+            time.sleep(2 ** attempt)
+
+    data = resp.json()
+    contract_lc = contract.lower()
+    sales: list[dict] = []
+
+    for item in data.get("result") or []:
+        token_ids = item.get("token_ids") or []
+        if not token_ids:
+            continue
+        try:
+            token_id = int(token_ids[0])
+        except (ValueError, TypeError):
+            continue
+
+        tx_hash = (item.get("transaction_hash") or "").lower() or None
+        if not tx_hash:
+            continue  # skip unanchored trades — no dedup key
+
+        price_eth: float | None = None
+        if item.get("price_formatted"):
+            try:
+                price_eth = float(item["price_formatted"])
+            except (ValueError, TypeError):
+                pass
+        if price_eth is None and item.get("price"):
+            try:
+                price_eth = int(item["price"]) / 1e18
+            except (ValueError, TypeError):
+                pass
+        if price_eth is None:
+            continue
+
+        sold_at: datetime | None = None
+        raw_ts = item.get("block_timestamp")
+        if raw_ts:
+            try:
+                sold_at = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                pass
+
+        sales.append({
+            "contract_address": contract_lc,
+            "token_id": token_id,
+            "sale_price_eth": price_eth,
+            "seller_address": (item.get("seller_address") or "").lower() or None,
+            "buyer_address": (item.get("buyer_address") or "").lower() or None,
+            "marketplace": item.get("marketplace_address") or None,
+            "tx_hash": tx_hash,
+            "sold_at": sold_at,
+        })
+
+    time.sleep(RATE_SLEEP)
+
+    return SalesPage(
+        sales=sales,
         next_cursor=data.get("cursor") or None,
         total=int(data.get("total") or 0),
     )

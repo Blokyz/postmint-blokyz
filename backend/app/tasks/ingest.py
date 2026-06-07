@@ -8,10 +8,12 @@ from sqlalchemy import func, select, text
 from app.config import get_settings
 from app.db.models import IngestJob, Token
 from app.db.session import SessionLocal
-from app.ingestion.db_writer import upsert_tokens, upsert_traits
+from app.ingestion.db_writer import upsert_sales, upsert_tokens, upsert_traits
 from app.ingestion.errors import EmptyCollectionError, IngestError, MoralisApiError
-from app.ingestion.moralis_client import fetch_nft_page
+from app.ingestion.moralis_client import fetch_nft_page, fetch_sales_page
+from app.wash_trade import flag_wash_trades
 from app.manifests import build_ranking_manifest, write_ranking_manifest
+from app.scoring.market_premium import compute_market_premium
 from app.scoring.stat_rarity import compute_stat_rarity
 from app.worker import celery_app
 
@@ -73,6 +75,33 @@ def run_ingest(self, job_id: str) -> None:
                 f"Moralis returned 0 NFTs for {contract} on chain {chain}"
             )
 
+        # ── Fetch sales history ───────────────────────────────────────────────────
+        sales_cursor: str | None = None
+        total_sales = 0
+        while True:
+            sales_page = fetch_sales_page(contract, chain, settings.moralis_api_key, sales_cursor)
+            if sales_page.sales:
+                upsert_sales(db, sales_page.sales)
+                total_sales += len(sales_page.sales)
+            if not sales_page.next_cursor:
+                break
+            sales_cursor = sales_page.next_cursor
+        log.info("Fetched %d sales for %s", total_sales, contract)
+
+        # ── Flag wash trades ──────────────────────────────────────────────────────
+        wash = flag_wash_trades(db, contract)
+        log.info("Wash trade detection for %s: %s", contract, wash)
+
+        # ── Market premium regression ─────────────────────────────────────────────
+        market_result = compute_market_premium(db, contract)
+        log.info(
+            "Market premium for %s: method=%s r²=%s n_obs=%d",
+            contract,
+            market_result.method,
+            f"{market_result.r_squared:.3f}" if market_result.r_squared is not None else "n/a",
+            market_result.n_obs,
+        )
+
         # ── Compute stat rarity ───────────────────────────────────────────────────
         eligible_supply: int = db.scalar(
             select(func.count()).select_from(Token)
@@ -110,6 +139,7 @@ def run_ingest(self, job_id: str) -> None:
             eligible_supply=eligible_supply,
             snapshot_block=snapshot_block,
             ranked_traits=ranked.to_dict("records"),
+            market_result=market_result if market_result.method != "none" else None,
         )
         path = write_ranking_manifest(contract, manifest)
 

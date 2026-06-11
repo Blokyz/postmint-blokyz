@@ -1,12 +1,39 @@
-import { getDefaultConfig } from "@rainbow-me/rainbowkit";
+import { connectorsForWallets } from "@rainbow-me/rainbowkit";
+import {
+  coinbaseWallet,
+  metaMaskWallet,
+  rabbyWallet,
+  rainbowWallet,
+  walletConnectWallet,
+} from "@rainbow-me/rainbowkit/wallets";
+import { createConfig, http } from "wagmi";
 import { baseSepolia } from "wagmi/chains";
 
 export const chains = [baseSepolia] as const;
 
-export const wagmiConfig = getDefaultConfig({
-  appName: "Post-Mint Set Collection",
-  projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "00000000000000000000000000000000",
+const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "00000000000000000000000000000000";
+
+// Listing wallets explicitly (rather than relying on getDefaultConfig's generic
+// "Injected Wallet" entry) makes RainbowKit match each option to its real
+// extension via EIP-6963 rdns — so picking "MetaMask" can't resolve to whichever
+// other extension last grabbed window.ethereum.
+const connectors = connectorsForWallets(
+  [
+    {
+      groupName: "Popular",
+      wallets: [metaMaskWallet, rabbyWallet, coinbaseWallet, rainbowWallet, walletConnectWallet],
+    },
+  ],
+  {
+    appName: "Post-Mint Set Collection",
+    projectId,
+  },
+);
+
+export const wagmiConfig = createConfig({
   chains: [...chains],
+  connectors,
+  transports: { [baseSepolia.id]: http() },
   ssr: true,
 });
 

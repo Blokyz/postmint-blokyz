@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from Crypto.Hash import keccak
+
 if TYPE_CHECKING:
     from app.scoring.market_premium import MarketPremiumResult
 
@@ -125,3 +127,12 @@ def write_ranking_manifest(contract_address: str, manifest: dict) -> Path:
     path = OUTPUT_DIR / f"{contract_address}_ranking_manifest.json"
     path.write_text(json.dumps(manifest, indent=2))
     return path
+
+
+def compute_manifest_hash(manifest: dict) -> str:
+    """keccak256 over canonical JSON with `approval` nulled, so the hash commits
+    to the rules being approved (and is reproducible from the published manifest)."""
+    canonical = {**manifest, "approval": None}
+    encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    digest = keccak.new(data=encoded, digest_bits=256).digest()
+    return "0x" + digest.hex()

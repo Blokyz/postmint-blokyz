@@ -31,3 +31,31 @@ class StatusResponse(BaseModel):
     status: str | None
     progress_pct: int | None
     error_message: str | None
+
+
+class TraitApproval(BaseModel):
+    trait_category: str
+    trait_value: str
+    pinned: bool = False
+
+
+class ApproveRequest(BaseModel):
+    contract_address: str
+    approver_address: str
+    trait_rankings: list[TraitApproval]
+
+    @field_validator("contract_address", "approver_address")
+    @classmethod
+    def validate_addresses(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not _ETH_ADDRESS_RE.match(v):
+            raise ValueError("must be a valid EVM address (0x + 40 hex chars)")
+        return v
+
+
+class ApproveResponse(BaseModel):
+    contract_address: str
+    manifest_hash: str
+    approved_at: str
+    approver_address: str
+    trait_count: int

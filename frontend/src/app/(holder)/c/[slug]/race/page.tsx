@@ -20,6 +20,11 @@ const mono = bodyFont;
 
 const REFRESH_MS = 15000;
 const CLAIM_CHAIN = 84532; // Base Sepolia — the chain seasons deploy on (podium tx links)
+// The backend verifies the claim tx on-chain; its RPC can briefly lag behind the
+// wallet's, so a freshly-mined tx may not be visible yet (409 retryable). Retry a
+// bounded number of times before giving up rather than falsely claiming success.
+const CONFIRM_MAX_RETRIES = 6;
+const CONFIRM_RETRY_MS = 4000;
 
 const TIER_ACCENT: Record<string, string> = {
   Common: "#8b93a0",
@@ -125,11 +130,45 @@ export default function RacePage() {
   // receipt with a hook, then POST /claim/confirm.
   const [pending, setPending] = useState<{ tier: string; hash: `0x${string}`; chainId: number } | null>(null);
   const [busyTier, setBusyTier] = useState<string | null>(null);
-  const { isSuccess: mined } = useWaitForTransactionReceipt({ hash: pending?.hash });
+  const { isSuccess: mined } = useWaitForTransactionReceipt({ hash: pending?.hash, chainId: pending?.chainId });
+  const confirmAttempt = useRef(0);
 
   // 1s ticker so racing countdowns move without refetching.
   const [, setTick] = useState(0);
   const loadedAt = useRef<number>(0);
+
+  // Persist the in-flight claim so a reload / tab-close can resume confirmation:
+  // the tx is already on-chain, only the DB record is missing. Keyed per contract.
+  const pendingKey = contract ? `pmb:pendingClaim:${contract.toLowerCase()}` : null;
+
+  // Restore a persisted pending claim on mount. useWaitForTransactionReceipt then
+  // re-subscribes to its hash, re-driving the confirm effect below.
+  useEffect(() => {
+    if (!pendingKey) return;
+    try {
+      const raw = localStorage.getItem(pendingKey);
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (saved?.hash && saved?.tier) {
+          setPending(saved);
+          setBusyTier(saved.tier);
+        }
+      }
+    } catch {
+      /* ignore malformed storage */
+    }
+  }, [pendingKey]);
+
+  // Mirror pending → localStorage (written before the tx is sent, cleared on resolve).
+  useEffect(() => {
+    if (!pendingKey) return;
+    try {
+      if (pending) localStorage.setItem(pendingKey, JSON.stringify(pending));
+      else localStorage.removeItem(pendingKey);
+    } catch {
+      /* ignore quota / disabled storage */
+    }
+  }, [pending, pendingKey]);
 
   const load = useCallback(
     async (wal: string) => {
@@ -181,30 +220,85 @@ export default function RacePage() {
     };
   }, [wallet, lanes, load]);
 
-  // When a claim tx is mined, tell the backend and reload.
+  // When a claim tx is mined, record it with the backend (which verifies it
+  // on-chain). We must NOT show success unless the backend actually confirms —
+  // otherwise a wallet is a winner on-chain but invisible in the DB. The RPC can
+  // lag, so a retryable 409 / 503 is retried before giving up.
   useEffect(() => {
     if (!mined || !pending || !wallet) return;
-    (async () => {
+    const claim = pending; // stable non-null capture for the nested closures
+    let cancelled = false;
+    confirmAttempt.current = 0;
+
+    const settle = () => {
+      setPending(null);
+      setBusyTier(null);
+      load(wallet);
+    };
+    const retry = () => {
+      confirmAttempt.current += 1;
+      setNotice(`Claim landed on-chain — syncing… (${confirmAttempt.current}/${CONFIRM_MAX_RETRIES})`);
+      setTimeout(() => {
+        if (!cancelled) doConfirm();
+      }, CONFIRM_RETRY_MS);
+    };
+
+    async function doConfirm() {
       try {
-        await fetch(`${API_URL}/claim/confirm`, {
+        const res = await fetch(`${API_URL}/claim/confirm`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contract_address: contract,
-            tier: pending.tier,
+            tier: claim.tier,
             wallet_address: wallet,
-            tx_hash: pending.hash,
+            tx_hash: claim.hash,
           }),
         });
-        setNotice(`Slot claimed in ${pending.tier} — you're on the board.`);
+        if (cancelled) return;
+
+        if (res.ok) {
+          setNotice(`Slot claimed in ${claim.tier} — you're on the board.`);
+          settle();
+          return;
+        }
+        // 404 = window already consumed (a prior confirm succeeded, e.g. before a
+        // reload). Treat as done rather than erroring.
+        if (res.status === 404) {
+          settle();
+          return;
+        }
+
+        const body = await res.json().catch(() => null);
+        const detail = body?.detail;
+        const retryable =
+          (res.status === 409 && detail && typeof detail === "object" && detail.retryable) ||
+          res.status === 503;
+        if (retryable && confirmAttempt.current < CONFIRM_MAX_RETRIES) {
+          retry();
+          return;
+        }
+
+        // Non-retryable (e.g. 400 the tx didn't verify) or retries exhausted.
+        const msg =
+          typeof detail === "string" ? detail : detail?.message ?? `Recording failed (${res.status}).`;
+        setError(`${msg} Your tx is on-chain — it should sync on refresh; contact support if it persists.`);
+        settle();
       } catch {
+        if (cancelled) return;
+        if (confirmAttempt.current < CONFIRM_MAX_RETRIES) {
+          retry();
+          return;
+        }
         setNotice("Claim landed on-chain, but recording it failed — refresh to sync.");
-      } finally {
-        setPending(null);
-        setBusyTier(null);
-        load(wallet);
+        settle();
       }
-    })();
+    }
+
+    doConfirm();
+    return () => {
+      cancelled = true;
+    };
   }, [mined, pending, contract, wallet, load]);
 
   async function startWindow(tier: string) {

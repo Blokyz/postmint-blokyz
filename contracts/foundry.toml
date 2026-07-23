@@ -5,10 +5,12 @@ libs = ["lib"]
 solc = "0.8.24"
 optimizer = true
 optimizer_runs = 200
-via_ir = false
+via_ir = true  # SetClaimManager.claim (6 calldata params + asm recover) overflows the legacy stack
 
 [rpc_endpoints]
 base_sepolia = "${BASE_SEPOLIA_RPC_URL}"
 
+# Etherscan API v2 (the per-chain *.basescan.org v1 endpoints are deprecated);
+# one key works across chains, chain selected via chainid.
 [etherscan]
-base_sepolia = { key = "${BASESCAN_API_KEY}", url = "https://api-sepolia.basescan.org/api" }
+base_sepolia = { key = "${BASESCAN_API_KEY}", url = "https://api.etherscan.io/v2/api?chainid=84532", chain = 84532 }

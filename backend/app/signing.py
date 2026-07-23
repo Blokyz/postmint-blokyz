@@ -62,3 +62,27 @@ def recover_approval_signer(
     message = build_approval_message(contract_address, ordered_traits, w_stat, w_market)
     recovered = Account.recover_message(encode_defunct(text=message), signature=signature)
     return recovered.lower()
+
+
+def build_publish_message(contract_address: str, slug: str, display_name: str) -> str:
+    """Deterministic message an operator signs to publish a collection.
+
+    Binds the contract + slug + display name being published so a signature can't
+    be reused for a different collection. Plain lines (no JSON) so the frontend
+    reproduces the bytes trivially — keep the client mirror in lockstep.
+    """
+    return (
+        "PostMint collection publish\n"
+        f"contract:{contract_address.lower()}\n"
+        f"slug:{slug}\n"
+        f"name:{display_name}"
+    )
+
+
+def recover_publish_signer(
+    contract_address: str, slug: str, display_name: str, signature: str
+) -> str:
+    """Recover the lowercased signer of a publish message (see build_publish_message)."""
+    message = build_publish_message(contract_address, slug, display_name)
+    recovered = Account.recover_message(encode_defunct(text=message), signature=signature)
+    return recovered.lower()

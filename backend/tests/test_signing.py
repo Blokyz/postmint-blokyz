@@ -4,7 +4,12 @@ import pytest
 from eth_account import Account
 from eth_account.messages import encode_defunct
 
-from app.signing import build_approval_message, recover_approval_signer
+from app.signing import (
+    build_approval_message,
+    build_publish_message,
+    recover_approval_signer,
+    recover_publish_signer,
+)
 
 _KEY = "0x" + "11" * 32
 _ADDR = Account.from_key(_KEY).address.lower()
@@ -71,3 +76,25 @@ def test_changing_weights_changes_recovered_address():
 def test_undecodable_signature_raises():
     with pytest.raises(Exception):
         recover_approval_signer(_CONTRACT, _ORDER, _WS, _WM, "0x" + "00" * 65)
+
+
+# --- publish message (operator authorization) ---
+
+
+def test_publish_message_lowercases_contract_and_binds_fields():
+    msg = build_publish_message(_CONTRACT.upper(), "good-vibes", "Good Vibes")
+    assert _CONTRACT in msg  # lowercased
+    assert "slug:good-vibes" in msg
+    assert "name:Good Vibes" in msg
+
+
+def test_publish_roundtrip_recovers_signer():
+    msg = build_publish_message(_CONTRACT, "good-vibes", "Good Vibes")
+    assert recover_publish_signer(_CONTRACT, "good-vibes", "Good Vibes", _sign(msg)) == _ADDR
+
+
+def test_publish_signature_bound_to_slug_and_name():
+    sig = _sign(build_publish_message(_CONTRACT, "good-vibes", "Good Vibes"))
+    # A signature for one slug/name doesn't recover the signer for another.
+    assert recover_publish_signer(_CONTRACT, "evil-slug", "Good Vibes", sig) != _ADDR
+    assert recover_publish_signer(_CONTRACT, "good-vibes", "Evil Name", sig) != _ADDR

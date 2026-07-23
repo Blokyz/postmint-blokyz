@@ -388,6 +388,29 @@ def test_approve_forged_signature_rejected(client, db, tmp_path):
     assert r.status_code == 401
 
 
+def test_approve_authorized_when_signer_allowlisted(client, db, tmp_path, monkeypatch):
+    """With the allowlist configured, an approval from a listed signer succeeds."""
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "operator_allowlist", _APPROVER)
+    _add_approvable_job(db, tmp_path)
+    order = [("Eyes", "Laser"), ("Background", "Red"), ("Background", "Blue")]
+    r = client.post("/audit/approve", json=_approve_payload(order, pinned_values=["Laser"]))
+    assert r.status_code == 200, r.text
+
+
+def test_approve_rejected_when_signer_not_allowlisted(client, db, tmp_path, monkeypatch):
+    """A validly-signed approval from a non-operator is authenticated but not
+    authorized → 403 (authN vs authZ)."""
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "operator_allowlist", _OTHER_ADDRESS)
+    _add_approvable_job(db, tmp_path)
+    order = [(t["trait_category"], t["trait_value"]) for t in _TRAITS]
+    r = client.post("/audit/approve", json=_approve_payload(order))  # signed by _APPROVER
+    assert r.status_code == 403
+
+
 def test_approve_tampered_order_rejected(client, db, tmp_path):
     """Sign one order, submit a different one — the message changes so the
     recovered signer no longer matches approver_address."""

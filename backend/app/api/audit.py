@@ -15,6 +15,7 @@ from app.api.schemas import (
     IngestResponse,
     StatusResponse,
 )
+from app.api.auth import assert_operator
 from app.config import get_settings
 from app.db.models import IngestJob
 from app.db.session import get_db
@@ -165,6 +166,9 @@ def approve(req: ApproveRequest, db: Session = Depends(get_db)) -> ApproveRespon
             detail="Signature does not match approver_address (signer recovered: "
             f"{signer}).",
         )
+    # Authorize: the authenticated signer must be a sanctioned operator (no-op
+    # until `operator_allowlist` is configured — see app.api.auth).
+    assert_operator(signer)
 
     manifest = json.loads(path.read_text())
     existing = {(r["trait_category"], r["trait_value"]): r for r in manifest["trait_rankings"]}

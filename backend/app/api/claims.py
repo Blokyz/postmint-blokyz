@@ -34,6 +34,7 @@ from app.api.schemas import (
     SeasonRegisterRequest,
     SeasonResponse,
 )
+from app.api.auth import require_operator_token
 from app.claim_signing import backend_signer_address, sign_claim_attestation
 from app.claims.eligibility import evaluate_wallet, find_tier_entry
 from app.claims.onchain import ClaimVerificationError, ReceiptNotFound, verify_claim_tx
@@ -380,9 +381,14 @@ def winners(contract: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/claims/season", response_model=SeasonResponse)
-def register_season(req: SeasonRegisterRequest, db: Session = Depends(get_db)) -> SeasonResponse:
+def register_season(
+    req: SeasonRegisterRequest,
+    db: Session = Depends(get_db),
+    _auth: None = Depends(require_operator_token),
+) -> SeasonResponse:
     """Register a deployed `SetClaimManager` so `/claim/sign` can attest for it.
-    Idempotent on `manager_address`. (Platform-operated; deploy script calls this.)"""
+    Idempotent on `manager_address`. Platform-operated: gated by the operator
+    bearer token when `operator_api_token` is configured (open in dev)."""
     season = record_season(
         db,
         req.contract_address,

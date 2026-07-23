@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.auth import assert_operator
 from app.api.schemas import CollectionCreateRequest, CollectionResponse, CollectionSummary
 from app.collections_registry import (
     SlugError,
@@ -22,7 +23,9 @@ from app.collections_registry import (
     get_by_slug,
     list_collections,
 )
+from app.config import get_settings
 from app.db.session import get_db
+from app.signing import recover_publish_signer
 
 router = APIRouter(prefix="/collections", tags=["collections"])
 
@@ -41,7 +44,23 @@ def _to_response(col) -> CollectionResponse:
 @router.post("", response_model=CollectionResponse)
 def publish(req: CollectionCreateRequest, db: Session = Depends(get_db)) -> CollectionResponse:
     """Publish a collection. Slug is validated or derived from `display_name`.
-    Idempotent per contract (re-publish keeps the slug)."""
+    Idempotent per contract (re-publish keeps the slug).
+
+    Authorized against `operator_allowlist` when configured: the operator must
+    wallet-sign the publish message (contract+slug+name). Open when unset (dev)."""
+    if get_settings().operator_allowlist_set:
+        if not req.operator_address or not req.signature:
+            raise HTTPException(status_code=401, detail="Operator signature required to publish.")
+        try:
+            signer = recover_publish_signer(
+                req.contract_address, req.slug or "", req.display_name, req.signature
+            )
+        except Exception:
+            raise HTTPException(status_code=400, detail="Malformed or undecodable signature.")
+        if signer != req.operator_address.lower():
+            raise HTTPException(status_code=401, detail="Signature does not match operator_address.")
+        assert_operator(signer)
+
     try:
         col = create_collection(
             db,

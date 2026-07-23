@@ -256,6 +256,10 @@ class CollectionCreateRequest(BaseModel):
     slug: str | None = None
     image_url: str | None = None
     published: bool = True
+    # Operator authorization (enforced only when `operator_allowlist` is set).
+    # EIP-191 personal_sign over app.signing.build_publish_message, plus the signer.
+    operator_address: str | None = None
+    signature: str | None = None
 
     @field_validator("contract_address")
     @classmethod

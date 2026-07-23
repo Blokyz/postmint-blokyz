@@ -126,3 +126,56 @@ def test_directory_hides_unpublished_by_default(client, db):
     _publish(client, slug="gvc", published=False)
     assert client.get("/collections").json() == []
     assert len(client.get("/collections?all=true").json()) == 1
+
+
+# --- operator authorization (enforced only when operator_allowlist configured) ---
+
+from eth_account import Account  # noqa: E402
+from eth_account.messages import encode_defunct  # noqa: E402
+
+from app.config import get_settings  # noqa: E402
+from app.signing import build_publish_message  # noqa: E402
+
+_OP_KEY = "0x" + "55" * 32
+_OP_ADDR = Account.from_key(_OP_KEY).address.lower()
+_DISPLAY = "Good Vibes Club"
+
+
+def _sign_publish(contract, slug, name, key=_OP_KEY):
+    sig = Account.sign_message(
+        encode_defunct(text=build_publish_message(contract, slug, name)), private_key=key
+    ).signature.hex()
+    return sig if sig.startswith("0x") else "0x" + sig
+
+
+def test_publish_open_when_allowlist_unset(client, db):
+    """Default (empty allowlist): publish works with no signature — dev behavior."""
+    assert _publish(client, slug="gvc").status_code == 200
+
+
+def test_publish_requires_signature_when_allowlisted(client, db, monkeypatch):
+    monkeypatch.setattr(get_settings(), "operator_allowlist", _OP_ADDR)
+    assert _publish(client, slug="gvc").status_code == 401  # no signature
+
+
+def test_publish_accepts_operator_signature(client, db, monkeypatch):
+    monkeypatch.setattr(get_settings(), "operator_allowlist", _OP_ADDR)
+    sig = _sign_publish(CONTRACT, "gvc", _DISPLAY)
+    r = _publish(client, slug="gvc", operator_address=_OP_ADDR, signature=sig)
+    assert r.status_code == 200, r.text
+
+
+def test_publish_rejects_non_operator_signature(client, db, monkeypatch):
+    # Allowlist holds a different address than the (valid) signer → 403.
+    monkeypatch.setattr(get_settings(), "operator_allowlist", "0x" + "de" * 20)
+    sig = _sign_publish(CONTRACT, "gvc", _DISPLAY)
+    r = _publish(client, slug="gvc", operator_address=_OP_ADDR, signature=sig)
+    assert r.status_code == 403
+
+
+def test_publish_rejects_mismatched_signature(client, db, monkeypatch):
+    # Signature is for a different slug than submitted → recovered signer ≠ operator_address.
+    monkeypatch.setattr(get_settings(), "operator_allowlist", _OP_ADDR)
+    sig = _sign_publish(CONTRACT, "other-slug", _DISPLAY)
+    r = _publish(client, slug="gvc", operator_address=_OP_ADDR, signature=sig)
+    assert r.status_code == 401

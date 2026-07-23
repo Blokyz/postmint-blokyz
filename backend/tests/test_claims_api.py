@@ -331,3 +331,17 @@ def test_register_season_idempotent(client, db):
     from app.db.models import Season
 
     assert db.query(Season).count() == 1
+
+
+def test_register_season_requires_token_when_configured(client, db, monkeypatch):
+    """With operator_api_token set, the platform bearer token is required."""
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "operator_api_token", "s3cret")
+    assert _register_season(client).status_code == 401  # no token
+    ok = client.post(
+        "/claims/season",
+        json={"contract_address": CONTRACT, "manager_address": MANAGER},
+        headers={"Authorization": "Bearer s3cret"},
+    )
+    assert ok.status_code == 200

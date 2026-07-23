@@ -31,9 +31,25 @@ class Settings(BaseSettings):
     # lands after it. Keep short so a leaked/stale sig can't be replayed later.
     claim_sig_ttl_seconds: int = 3600
 
+    # Operator authorization (Wave-2 auth remainder). ENFORCE-WHEN-CONFIGURED:
+    # while these are EMPTY (the dev/test default) the gates are OPEN and nothing
+    # changes — SET BOTH BEFORE MAINNET.
+    #  - operator_allowlist: comma-separated wallet addresses permitted to approve
+    #    rankings (POST /audit/approve) and publish collections (POST /collections).
+    #    Enforced against the recovered EIP-191 signer, so it is real authorization.
+    #  - operator_api_token: shared bearer token for server-to-server platform
+    #    calls (POST /claims/season, called by the deploy script — there is no
+    #    wallet to sign with there).
+    operator_allowlist: str = ""
+    operator_api_token: str = ""
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def operator_allowlist_set(self) -> set[str]:
+        return {a.strip().lower() for a in self.operator_allowlist.split(",") if a.strip()}
 
 
 @lru_cache

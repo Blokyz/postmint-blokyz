@@ -24,7 +24,10 @@ def _sale(token_id: int, price: float, index: int) -> Sale:
     return Sale(
         contract_address=CONTRACT,
         token_id=token_id,
-        sale_price_eth=price,
+        # float() so numpy scalars (np.float64 from np.exp) never reach psycopg2 —
+        # numpy 2.0's scalar repr `np.float64(...)` leaks into the SQL and Postgres
+        # reads it as a missing schema "np". Production already passes native floats.
+        sale_price_eth=float(price),
         seller_address="0xseller",
         buyer_address="0xbuyer",
         sold_at=T0 + timedelta(hours=index),
@@ -98,6 +101,22 @@ def test_market_norm_range(db):
     norms = result.traits["market_norm"]
     assert norms.min() >= 0.0 - 1e-9
     assert norms.max() <= 1.0 + 1e-9
+
+
+def test_reference_levels_not_all_zero_normed(db):
+    """Regression: min-max on raw coefs mapped EVERY category's reference level
+    (coef=0) to market_norm=0, so each looked like the cheapest trait. With
+    within-category centering, references are differentiated by category context
+    instead of collapsing to a shared floor."""
+    _insert_collection(db, n_per_group=12, bg_premium=0.5, eyes_premium=1.5)
+
+    result = compute_market_premium(db, CONTRACT)
+    traits = result.traits.set_index(["trait_category", "trait_value"])
+
+    blue = traits.loc[("Background", "Blue"), "market_norm"]   # a reference level
+    normal = traits.loc[("Eyes", "Normal"), "market_norm"]     # a reference level
+    assert blue != normal            # old min-max gave both exactly 0.0
+    assert blue > 0.0                 # Blue sits mid-pack, not on the floor
 
 
 def test_all_traits_present_in_output(db):

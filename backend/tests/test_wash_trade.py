@@ -22,7 +22,10 @@ def _sale(token_id: int, seller: str, buyer: str, price: float, sold_at=T0, tx_s
     return Sale(
         contract_address=CONTRACT,
         token_id=token_id,
-        sale_price_eth=price,
+        # float() so numpy scalars (np.float64) never reach psycopg2 — numpy 2.0's
+        # scalar repr `np.float64(...)` leaks into the SQL and Postgres reads it as
+        # a missing schema "np". Production already passes native floats.
+        sale_price_eth=float(price),
         seller_address=seller,
         buyer_address=buyer,
         sold_at=sold_at,

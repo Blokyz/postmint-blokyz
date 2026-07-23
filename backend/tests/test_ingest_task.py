@@ -21,6 +21,22 @@ _EMPTY_PAGE = NftPage(tokens=[], traits=[], next_cursor=None, total=0)
 
 _CONTRACT = "0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d"
 
+
+@pytest.fixture(autouse=True)
+def _stub_sales_fetch(monkeypatch):
+    """The per-test `with patch(...)` blocks only mock fetch_nft_page, so the
+    task's sales loop would otherwise call the REAL fetch_sales_page over HTTP —
+    which blocks/retries for minutes against the fake test key (this was the
+    long-standing "ingest test hangs" issue). Stub it to an empty page; tests
+    that need specific sales can re-patch it themselves.
+    """
+    from app.ingestion.moralis_client import SalesPage
+
+    monkeypatch.setattr(
+        "app.tasks.ingest.fetch_sales_page",
+        lambda *args, **kwargs: SalesPage(sales=[], next_cursor=None, total=0),
+    )
+
 # Two pages of fake Moralis data: page 1 has a cursor, page 2 does not.
 _PAGE_1 = NftPage(
     tokens=[

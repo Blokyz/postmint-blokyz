@@ -110,13 +110,13 @@ def _flag_clusters(db: Session, contract: str, window_start: datetime) -> int:
     result = db.execute(
         text("""
             WITH windowed AS (
-                SELECT token_id, lower(buyer_address)  AS wallet
+                SELECT id AS sale_id, token_id, lower(buyer_address)  AS wallet
                 FROM sales
                 WHERE contract_address = :contract
                   AND buyer_address IS NOT NULL
                   AND (sold_at IS NULL OR sold_at >= :window_start)
                 UNION ALL
-                SELECT token_id, lower(seller_address) AS wallet
+                SELECT id AS sale_id, token_id, lower(seller_address) AS wallet
                 FROM sales
                 WHERE contract_address = :contract
                   AND seller_address IS NOT NULL
@@ -125,7 +125,10 @@ def _flag_clusters(db: Session, contract: str, window_start: datetime) -> int:
             stats AS (
                 SELECT
                     token_id,
-                    COUNT(*)                    AS trades,
+                    -- COUNT(DISTINCT sale_id), not COUNT(*): the buyer/seller
+                    -- UNION ALL yields two rows per sale, so COUNT(*) would
+                    -- double-count trades and halve the effective threshold.
+                    COUNT(DISTINCT sale_id)      AS trades,
                     COUNT(DISTINCT wallet)       AS wallets
                 FROM windowed
                 GROUP BY token_id

@@ -1,0 +1,113 @@
+"""Transfer polling for the holding-window engine (PROJECT_MASTER §11).
+
+Keeps `tokens.owner_address` current from Moralis NFT transfer events and resets
+any active holding window whose wallet transferred qualifying tokens out and fell
+below the tier's `count_required`. Resumable via the `transfer_sync` high-water
+block, so each poll only scans new ownership changes.
+
+Idempotent by design: re-applying a transfer sets the same final owner, and window
+resets re-check current holdings — so re-processing a boundary block (which the
+poller does, resuming inclusively from `last_block`) is harmless.
+"""
+
+from __future__ import annotations
+
+from sqlalchemy import update
+from sqlalchemy.orm import Session
+
+from app.claims.windows import reset_if_unqualified
+from app.config import get_settings
+from app.db.models import Token, TransferSync
+from app.ingestion.moralis_client import fetch_transfers_page
+
+# Safety bound on pages fetched per poll cycle — a huge backlog is drained over
+# several cycles (each resumes from the recorded high-water block).
+MAX_POLL_PAGES = 50
+
+
+def _load_sync(db: Session, contract: str) -> TransferSync:
+    row = db.get(TransferSync, contract)
+    if row is None:
+        row = TransferSync(contract_address=contract, last_block=None, cursor=None)
+        db.add(row)
+    return row
+
+
+def apply_transfer_ownership(db: Session, contract: str, transfers: list[dict]) -> int:
+    """Set `tokens.owner_address` to the latest `to_address` per token.
+
+    `transfers` must be chronological (oldest first) so the last write wins.
+    Returns the number of token rows updated (tokens not in our snapshot are
+    skipped — no traits, so irrelevant to eligibility)."""
+    latest: dict[int, str] = {}
+    for t in transfers:
+        if t["to_address"] is not None:
+            latest[t["token_id"]] = t["to_address"]
+
+    updated = 0
+    for token_id, owner in latest.items():
+        res = db.execute(
+            update(Token)
+            .where(Token.contract_address == contract, Token.token_id == token_id)
+            .values(owner_address=owner)
+        )
+        updated += res.rowcount or 0
+    return updated
+
+
+def poll_transfers(
+    db: Session,
+    contract: str,
+    chain: str,
+    atlas_manifest: dict,
+    api_key: str | None = None,
+    max_pages: int = MAX_POLL_PAGES,
+) -> dict:
+    """Fetch new transfers, update ownership, and reset windows that no longer
+    qualify. Flushes; the caller commits. Returns a summary dict."""
+    contract = contract.lower()
+    api_key = api_key or get_settings().moralis_api_key
+
+    sync = _load_sync(db, contract)
+    # Resume inclusively from the last processed block (re-processing the boundary
+    # block is idempotent) so a mid-block pagination cut can't open a gap.
+    from_block = sync.last_block if sync.last_block is not None else None
+
+    transfers: list[dict] = []
+    max_block = sync.last_block
+    cursor: str | None = None
+    pages = 0
+
+    while pages < max_pages:
+        page = fetch_transfers_page(contract, chain, api_key, cursor=cursor, from_block=from_block)
+        transfers.extend(page.transfers)
+        for t in page.transfers:
+            if t["block_number"] is not None:
+                max_block = t["block_number"] if max_block is None else max(max_block, t["block_number"])
+        pages += 1
+        cursor = page.next_cursor
+        if not cursor:
+            break
+
+    tokens_updated = apply_transfer_ownership(db, contract, transfers)
+
+    # Only out-transfers (from_address) can drop a wallet below X; in-transfers
+    # don't auto-start windows (explicit opt-in), so we don't scan to_address.
+    affected = {t["from_address"] for t in transfers if t["from_address"]}
+    windows_reset: list[dict] = []
+    for wallet in affected:
+        for tier in reset_if_unqualified(db, contract, wallet, atlas_manifest):
+            windows_reset.append({"wallet": wallet, "tier": tier})
+
+    sync.last_block = max_block
+    sync.cursor = None  # cursors aren't reused across cycles; from_block resumes us
+    db.flush()
+
+    return {
+        "transfers": len(transfers),
+        "tokens_updated": tokens_updated,
+        "windows_reset": windows_reset,
+        "last_block": max_block,
+        "pages": pages,
+        "drained": cursor is None,
+    }

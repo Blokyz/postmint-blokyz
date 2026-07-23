@@ -6,10 +6,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from eth_account import Account
+from eth_account.messages import encode_defunct
 from sqlalchemy import select
 
 from app.db.models import IngestJob
 from app.manifests import compute_manifest_hash
+from app.signing import build_approval_message
 
 _CONTRACT = "0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d"
 _CONTRACT_MIXED = "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"  # mixed-case input
@@ -105,6 +108,50 @@ def test_ingest_invalid_address_rejected(client):
     assert r.status_code == 422
 
 
+# ── Concurrent-ingest race (Wave 3) ────────────────────────────────────────────
+
+def test_unique_active_job_index_enforced(db):
+    from sqlalchemy.exc import IntegrityError
+
+    _add_job(db, status="running")
+    with pytest.raises(IntegrityError):
+        _add_job(db, status="pending")
+    db.rollback()
+
+
+def test_failed_and_complete_jobs_do_not_block_new_active(db):
+    _add_job(db, status="failed")
+    _add_job(db, status="complete")
+    _add_job(db, status="pending")  # must not raise
+
+
+def test_ingest_race_lost_insert_resumes_winner(client, db):
+    """Simulate losing the check-then-insert race: the winner's active job lands
+    after our no-active-job check but before our commit. The unique index rejects
+    our insert and the endpoint must hand back the winner's job as a resume."""
+    from app.api import audit as audit_mod
+
+    winner = _add_job(db, status="running")
+    real_active_job = audit_mod._active_job
+    calls = {"n": 0}
+
+    def racy_active_job(db_, contract):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return None  # the pre-insert check ran before the winner committed
+        return real_active_job(db_, contract)
+
+    with patch("app.api.audit._active_job", side_effect=racy_active_job), \
+         patch("app.api.audit.run_ingest.delay") as mock_delay:
+        r = client.post("/audit/ingest", json={"contract_address": _CONTRACT, "chain": "eth"})
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["job_id"] == winner.id
+    assert "re-queued" in body["message"]
+    mock_delay.assert_called_once_with(winner.id)
+
+
 def test_ingest_short_hex_rejected(client):
     r = client.post("/audit/ingest", json={"contract_address": "0xabc", "chain": "eth"})
     assert r.status_code == 422
@@ -183,7 +230,18 @@ def test_ranking_missing_manifest_file_returns_500(client, db):
 
 # ── POST /audit/approve ────────────────────────────────────────────────────────
 
-_APPROVER = "0x1234567890abcdef1234567890abcdef12345678"
+# Deterministic test keys; addresses are derived so the recovered signer matches.
+_APPROVER_KEY = "0x" + "11" * 32
+_OTHER_KEY = "0x" + "22" * 32
+_APPROVER = Account.from_key(_APPROVER_KEY).address.lower()
+_OTHER_ADDRESS = Account.from_key(_OTHER_KEY).address.lower()
+
+
+def _sign(contract, trait_rankings, w_stat=0.5, w_market=0.5, key=_APPROVER_KEY) -> str:
+    ordered = [(t["trait_category"], t["trait_value"], t["pinned"]) for t in trait_rankings]
+    message = build_approval_message(contract, ordered, w_stat, w_market)
+    sig = Account.sign_message(encode_defunct(text=message), private_key=key).signature.hex()
+    return sig if sig.startswith("0x") else "0x" + sig
 
 _TRAITS = [
     {"trait_category": "Background", "trait_value": "Blue"},
@@ -227,14 +285,22 @@ def _load_manifest(db, contract=_CONTRACT) -> dict:
     return json.loads(Path(job.manifest_path).read_text())
 
 
-def _approve_payload(order, approver=_APPROVER, pinned_values=()):
+def _approve_payload(
+    order, approver=_APPROVER, pinned_values=(), sign_key=_APPROVER_KEY,
+    signature=None, w_stat=0.5, w_market=0.5,
+):
+    trait_rankings = [
+        {"trait_category": c, "trait_value": v, "pinned": v in pinned_values}
+        for c, v in order
+    ]
     return {
         "contract_address": _CONTRACT,
         "approver_address": approver,
-        "trait_rankings": [
-            {"trait_category": c, "trait_value": v, "pinned": v in pinned_values}
-            for c, v in order
-        ],
+        "trait_rankings": trait_rankings,
+        "w_stat": w_stat,
+        "w_market": w_market,
+        "signature": signature if signature is not None
+        else _sign(_CONTRACT, trait_rankings, w_stat, w_market, sign_key),
     }
 
 
@@ -306,4 +372,98 @@ def test_approve_invalid_approver_address_rejected(client, db, tmp_path):
     order = [(t["trait_category"], t["trait_value"]) for t in _TRAITS]
 
     r = client.post("/audit/approve", json=_approve_payload(order, approver="not-an-address"))
+    assert r.status_code == 422
+
+
+# ── POST /audit/approve — signature authentication ──────────────────────────────
+
+def test_approve_forged_signature_rejected(client, db, tmp_path):
+    """Claims _APPROVER but signs with a different key — the recovered signer
+    won't match, so the approval is rejected (this is the forgery the field-only
+    version allowed)."""
+    _add_approvable_job(db, tmp_path)
+    order = [(t["trait_category"], t["trait_value"]) for t in _TRAITS]
+
+    r = client.post("/audit/approve", json=_approve_payload(order, approver=_APPROVER, sign_key=_OTHER_KEY))
+    assert r.status_code == 401
+
+
+def test_approve_tampered_order_rejected(client, db, tmp_path):
+    """Sign one order, submit a different one — the message changes so the
+    recovered signer no longer matches approver_address."""
+    _add_approvable_job(db, tmp_path)
+    payload = _approve_payload([(t["trait_category"], t["trait_value"]) for t in _TRAITS])
+    # Reorder after signing without re-signing.
+    payload["trait_rankings"] = list(reversed(payload["trait_rankings"]))
+
+    r = client.post("/audit/approve", json=payload)
+    assert r.status_code == 401
+
+
+def test_approve_tampered_pinned_rejected(client, db, tmp_path):
+    """Flipping a pinned flag after signing invalidates the signature."""
+    _add_approvable_job(db, tmp_path)
+    payload = _approve_payload([(t["trait_category"], t["trait_value"]) for t in _TRAITS])
+    payload["trait_rankings"][0]["pinned"] = True
+
+    r = client.post("/audit/approve", json=payload)
+    assert r.status_code == 401
+
+
+def test_approve_short_signature_rejected(client, db, tmp_path):
+    _add_approvable_job(db, tmp_path)
+    order = [(t["trait_category"], t["trait_value"]) for t in _TRAITS]
+
+    r = client.post("/audit/approve", json=_approve_payload(order, signature="0xdeadbeef"))
+    assert r.status_code == 422
+
+
+def test_approve_undecodable_signature_rejected(client, db, tmp_path):
+    _add_approvable_job(db, tmp_path)
+    order = [(t["trait_category"], t["trait_value"]) for t in _TRAITS]
+
+    r = client.post("/audit/approve", json=_approve_payload(order, signature="0x" + "00" * 65))
+    assert r.status_code == 400
+
+
+# ── POST /audit/approve — α/β weight blending ───────────────────────────────────
+
+def test_approve_reblends_combined_score_with_weights(client, db, tmp_path):
+    """The approver's chosen weights re-blend combined_score = w_stat*stat_norm
+    + w_market*market_norm and are persisted to the manifest."""
+    manifest = _manifest_with_traits()
+    for row in manifest["trait_rankings"]:
+        row["stat_norm"] = 0.8
+        row["market_norm"] = 0.2
+    _add_approvable_job(db, tmp_path, manifest=manifest)
+    order = [(t["trait_category"], t["trait_value"]) for t in _TRAITS]
+
+    r = client.post("/audit/approve", json=_approve_payload(order, w_stat=0.75, w_market=0.25))
+    assert r.status_code == 200
+    assert r.json()["w_stat"] == 0.75 and r.json()["w_market"] == 0.25
+
+    saved = _load_manifest(db)
+    assert saved["weights"] == {"w_stat": 0.75, "w_market": 0.25}
+    for row in saved["trait_rankings"]:
+        # 0.75 * 0.8 + 0.25 * 0.2 = 0.65
+        assert row["combined_score"] == pytest.approx(0.65)
+
+
+def test_approve_tampered_weights_rejected(client, db, tmp_path):
+    """Weights are covered by the signature: signing 0.5/0.5 then submitting
+    different weights fails recovery."""
+    _add_approvable_job(db, tmp_path)
+    payload = _approve_payload([(t["trait_category"], t["trait_value"]) for t in _TRAITS])
+    payload["w_stat"] = 0.7  # signed with 0.5/0.5
+    payload["w_market"] = 0.3
+
+    r = client.post("/audit/approve", json=payload)
+    assert r.status_code == 401
+
+
+def test_approve_weights_not_summing_to_one_rejected(client, db, tmp_path):
+    _add_approvable_job(db, tmp_path)
+    order = [(t["trait_category"], t["trait_value"]) for t in _TRAITS]
+
+    r = client.post("/audit/approve", json=_approve_payload(order, w_stat=0.7, w_market=0.7))
     assert r.status_code == 422

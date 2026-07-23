@@ -21,7 +21,7 @@ get_settings.cache_clear()
 _TEST_DB_URL = "postgresql://postmint:postmint@localhost:15432/postmint_test"
 _ADMIN_DB_URL = "postgresql://postmint:postmint@localhost:15432/postmint"
 
-_TABLES_TO_TRUNCATE = "tokens, traits, sales, claims, ingest_jobs"
+_TABLES_TO_TRUNCATE = "tokens, traits, sales, claims, ingest_jobs, transfer_sync, seasons, claim_nonces, collections"
 
 
 @pytest.fixture(scope="session")

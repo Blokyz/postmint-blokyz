@@ -13,6 +13,7 @@ statsmodels>=0.14.0
 scikit-learn>=1.4.0
 celery[redis]>=5.4.0
 pycryptodome>=3.20.0
+eth-account>=0.13.0
 
 # testing
 pytest>=8.0

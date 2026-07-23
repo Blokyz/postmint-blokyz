@@ -139,3 +139,38 @@ def test_write_ranking_manifest_filename(tmp_path, monkeypatch):
 
     path = write_ranking_manifest(_CONTRACT, _build())
     assert path.name == f"{_CONTRACT}_ranking_manifest.json"
+
+
+# ── Atomic writes (Wave 3) ─────────────────────────────────────────────────────
+
+def test_atomic_write_no_temp_leftover(tmp_path, monkeypatch):
+    import app.manifests as manifests_mod
+    monkeypatch.setattr(manifests_mod, "OUTPUT_DIR", tmp_path)
+
+    write_ranking_manifest(_CONTRACT, _build())
+    leftovers = [p for p in tmp_path.iterdir() if p.suffix == ".tmp"]
+    assert leftovers == []
+
+
+def test_atomic_write_overwrites_existing(tmp_path, monkeypatch):
+    import app.manifests as manifests_mod
+    monkeypatch.setattr(manifests_mod, "OUTPUT_DIR", tmp_path)
+
+    old = _build()
+    write_ranking_manifest(_CONTRACT, old)
+    new = _build()
+    path = write_ranking_manifest(_CONTRACT, new)
+    assert json.loads(path.read_text())["manifest_id"] == new["manifest_id"]
+
+
+def test_atomic_write_failure_preserves_old_file(tmp_path):
+    from app.manifests import atomic_write_json
+
+    target = tmp_path / "manifest.json"
+    target.write_text('{"old": true}')
+
+    with pytest.raises(TypeError):
+        atomic_write_json(target, {"bad": object()})  # not JSON-serializable
+
+    assert json.loads(target.read_text()) == {"old": True}
+    assert [p for p in tmp_path.iterdir() if p.suffix == ".tmp"] == []

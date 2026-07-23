@@ -139,7 +139,8 @@ def compute_market_premium(db: Session, contract: str) -> MarketPremiumResult:
 
     coef_df, method, r_squared = fit
 
-    # OLS drops one reference level per category; add them back with coef = 0.
+    # OLS drops one reference level per category; add them back with coef = 0
+    # (the within-category baseline, by construction).
     fitted_keys = set(coef_df["trait_key"])
     missing = [k for k in all_keys if k not in fitted_keys]
     if missing:
@@ -151,16 +152,28 @@ def compute_market_premium(db: Session, contract: str) -> MarketPremiumResult:
         })
         coef_df = pd.concat([coef_df, ref_df], ignore_index=True)
 
-    # Normalize to [0, 1].
-    c_min, c_max = coef_df["market_coef"].min(), coef_df["market_coef"].max()
-    if c_max > c_min:
-        coef_df["market_norm"] = (coef_df["market_coef"] - c_min) / (c_max - c_min)
-    else:
-        coef_df["market_norm"] = 0.5
-
-    # Unpack (category, value) tuples.
+    # Unpack (category, value) tuples (needed for within-category centering).
     coef_df["trait_category"] = [k[0] for k in coef_df["trait_key"]]
     coef_df["trait_value"] = [k[1] for k in coef_df["trait_key"]]
+
+    # Center coefficients within each category before normalizing. Dummy-coded
+    # coefs are premiums RELATIVE TO each category's dropped reference level, so a
+    # raw 0 means "same as this category's baseline", not "zero premium" — and
+    # coefs from different categories aren't on a common scale. Subtracting the
+    # per-category mean re-expresses every value as its premium vs. its own
+    # category's average (comparable across categories) and stops the reference
+    # level from masquerading as the cheapest trait in the collection.
+    cat_mean = coef_df.groupby("trait_category")["market_coef"].transform("mean")
+    centered = coef_df["market_coef"] - cat_mean
+
+    # Rank-normalize to [0, 1] rather than min-max: a single 1-of-N grail outlier
+    # dominates min-max and compresses every other trait toward 0, whereas rank
+    # (quantile) normalization is robust to outliers.
+    n = len(coef_df)
+    if n > 1:
+        coef_df["market_norm"] = centered.rank(method="average").sub(1).div(n - 1)
+    else:
+        coef_df["market_norm"] = 0.5
 
     # Merge n_sales and flag low-confidence traits.
     coef_df = coef_df.merge(trait_sale_counts, on=["trait_category", "trait_value"], how="left")

@@ -1,0 +1,36 @@
+{
+  "_comment": "Golden claimDigest vectors produced BY the contract (SetClaimManager.claimDigest) via contracts/test/ClaimDigestVector.t.sol. Regenerate with: forge test --match-contract ClaimDigestVector -vv. Cross-checked byte-for-byte in tests/test_claim_signing.py against app.claim_signing.build_claim_digest. The backendSigner is intentionally NOT part of the digest.",
+  "chain_id": 84532,
+  "manager_address": "0x5615dEB798BB3E4dFa0139dFa1b3D433Cc23b72f",
+  "nft_contract": "0xBC4CA0Eda7647a8aB7C2061c2e118A18A936BC46",
+  "wallet": "0x1111111111111111111111111111111111111111",
+  "vectors": [
+    {
+      "label": "3 tokens, Mythic",
+      "tier": "Mythic",
+      "token_ids": [1, 2, 3],
+      "window_started_at": 1000000,
+      "expiry": 1003600,
+      "nonce": 7,
+      "expected_digest": "0xf1468b16f659fd3fd6ad075908938f43785a32350be3d3d726a5c7917cbf6df7"
+    },
+    {
+      "label": "1 token, Common",
+      "tier": "Common",
+      "token_ids": [8888],
+      "window_started_at": 1700000000,
+      "expiry": 1700003600,
+      "nonce": 42,
+      "expected_digest": "0x061c2c541b352df62462e4a54d2774ff1e1dd43f1447c706b2072d0d41641b7d"
+    },
+    {
+      "label": "uint256-max token id (full-width word)",
+      "tier": "Common",
+      "token_ids": [115792089237316195423570985008687907853269984665640564039457584007913129639935],
+      "window_started_at": 1,
+      "expiry": 2,
+      "nonce": 1,
+      "expected_digest": "0x06480ea9e8fac14ebeb981b6bcac6cff47e348adec6bc594157e79251dbaee8d"
+    }
+  ]
+}

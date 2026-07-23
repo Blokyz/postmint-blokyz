@@ -1,0 +1,165 @@
+{
+  "serialize": [
+    {
+      "name": "empty_object",
+      "value": {},
+      "canonical": "{}",
+      "keccak": "0xb48d38f93eaa084033fc5970bf96e559c33c4cdc07d889ab00b4d63f9590739d"
+    },
+    {
+      "name": "empty_array",
+      "value": [],
+      "canonical": "[]",
+      "keccak": "0x518674ab2b227e5f11e9084f615d57663cde47bce1ba168b4c19c7ee22a73d70"
+    },
+    {
+      "name": "key_ordering",
+      "value": {
+        "b": 2,
+        "a": 1,
+        "c": 3
+      },
+      "canonical": "{\"a\":1,\"b\":2,\"c\":3}",
+      "keccak": "0x0822ab840ad717a17afbedcbc389b4c648199045b947af2f4c0f7759fb145211"
+    },
+    {
+      "name": "nested_key_ordering",
+      "value": {
+        "z": {
+          "b": 1,
+          "a": 2
+        },
+        "a": [
+          3,
+          2,
+          1
+        ]
+      },
+      "canonical": "{\"a\":[3,2,1],\"z\":{\"a\":2,\"b\":1}}",
+      "keccak": "0xf7ec3db768a81d42c7cf20577ff460bef3239e19056ecd4b02c7085fda23d5e3"
+    },
+    {
+      "name": "int_and_whole_float_collapse",
+      "value": {
+        "i": 1000,
+        "f": 1000.0,
+        "negzero": -0.0
+      },
+      "canonical": "{\"f\":1000,\"i\":1000,\"negzero\":0}",
+      "keccak": "0x049683bfdec7aaea82e3fef4ace5d97ff22e3d0686ac130448e92eb6fe13b813"
+    },
+    {
+      "name": "fractional_padding",
+      "value": {
+        "half": 0.5,
+        "six": 0.123456,
+        "tenth": 0.1
+      },
+      "canonical": "{\"half\":0.500000,\"six\":0.123456,\"tenth\":0.100000}",
+      "keccak": "0xf0356fe747d42376f630a4dfbcffaff5b65b7687377cc5d714179067aa8e0486"
+    },
+    {
+      "name": "whole_number_weights",
+      "value": {
+        "w_stat": 1.0,
+        "w_market": 0.0
+      },
+      "canonical": "{\"w_market\":0,\"w_stat\":1}",
+      "keccak": "0x7bf6f4fffb82056807c7a3d15d6013ba767c0b89f15f6e1c798bc5f03d3e285b"
+    },
+    {
+      "name": "bools_and_null",
+      "value": {
+        "t": true,
+        "f": false,
+        "n": null
+      },
+      "canonical": "{\"f\":false,\"n\":null,\"t\":true}",
+      "keccak": "0x040259f2aff5e6fad4a5e58d1c86b418950512c3b32171c685f56271bd1a6e80"
+    },
+    {
+      "name": "unicode_string",
+      "value": {
+        "trait": "Café ✦ 日本"
+      },
+      "canonical": "{\"trait\":\"Café ✦ 日本\"}",
+      "keccak": "0xb0df24fa0c4c714c264505ff460c604aaa1287e236dc64b792068ab9e3587da6"
+    },
+    {
+      "name": "string_with_escapes",
+      "value": {
+        "s": "line\nbreak \"quote\" \\slash"
+      },
+      "canonical": "{\"s\":\"line\\nbreak \\\"quote\\\" \\\\slash\"}",
+      "keccak": "0x20462baf727d7c189e95b506ee1e09cf293fef2b5885d50d092d050e41444703"
+    },
+    {
+      "name": "big_integer",
+      "value": {
+        "supply": 21500000,
+        "block": 987654321
+      },
+      "canonical": "{\"block\":987654321,\"supply\":21500000}",
+      "keccak": "0x2659da11a50623e7fae628c3016f59da8b97a086bf6464488f1e70f42be44d4a"
+    },
+    {
+      "name": "array_of_objects",
+      "value": [
+        {
+          "rank": 1,
+          "v": 0.5
+        },
+        {
+          "rank": 2,
+          "v": 0.25
+        }
+      ],
+      "canonical": "[{\"rank\":1,\"v\":0.500000},{\"rank\":2,\"v\":0.250000}]",
+      "keccak": "0x8728b708d1b5f8d7db6dfd45712d7ae8292bb539618369eb129fbb1fe215c31b"
+    }
+  ],
+  "manifest": [
+    {
+      "name": "mini_manifest_with_approval",
+      "manifest": {
+        "manifest_id": "fixed-id-123",
+        "schema_version": "1.0",
+        "collection": {
+          "contract_address": "0xabc",
+          "total_supply": 10000,
+          "eligible_supply": 9988
+        },
+        "weights": {
+          "w_stat": 0.5,
+          "w_market": 0.5
+        },
+        "trait_rankings": [
+          {
+            "rank": 1,
+            "trait_category": "Fur",
+            "trait_value": "Gold",
+            "stat_norm": 1.0,
+            "combined_score": 1.0,
+            "market_norm": null,
+            "pinned": true
+          },
+          {
+            "rank": 2,
+            "trait_category": "Fur",
+            "trait_value": "Brown",
+            "stat_norm": 0.0,
+            "combined_score": 0.0,
+            "market_norm": null,
+            "pinned": false
+          }
+        ],
+        "approval": {
+          "approver_address": "0xdead",
+          "approved_at": "2026-06-29T00:00:00Z",
+          "manifest_hash": "0xshould-be-ignored"
+        }
+      },
+      "hash": "0xa296e91688c9c37d014cc53678f8766ca8882405c868bae67758d7f2fd7fbd62"
+    }
+  ]
+}

@@ -16,7 +16,7 @@ celery_app = Celery(
     "postmint",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks.ingest"],
+    include=["app.tasks.ingest", "app.tasks.claims"],
 )
 
 _worker_pool = "solo" if sys.platform == "win32" else "prefork"

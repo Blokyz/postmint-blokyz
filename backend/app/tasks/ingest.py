@@ -35,6 +35,7 @@ def run_ingest(self, job_id: str) -> None:
             raise IngestError("MORALIS_API_KEY is not configured")
 
         job.status = "running"
+        job.phase = "fetching_nfts"
         job.error_message = None
         db.commit()
         log.info("run_ingest started job %s for %s", job_id, job.contract_address)
@@ -76,6 +77,8 @@ def run_ingest(self, job_id: str) -> None:
             )
 
         # ── Fetch sales history ───────────────────────────────────────────────────
+        job.phase = "fetching_sales"
+        db.commit()
         sales_cursor: str | None = None
         total_sales = 0
         while True:
@@ -89,6 +92,8 @@ def run_ingest(self, job_id: str) -> None:
         log.info("Fetched %d sales for %s", total_sales, contract)
 
         # ── Flag wash trades ──────────────────────────────────────────────────────
+        job.phase = "scoring"
+        db.commit()
         wash = flag_wash_trades(db, contract)
         log.info("Wash trade detection for %s: %s", contract, wash)
 
@@ -144,6 +149,7 @@ def run_ingest(self, job_id: str) -> None:
         path = write_ranking_manifest(contract, manifest)
 
         job.status = "complete"
+        job.phase = "done"
         job.progress_pct = 100
         job.manifest_path = str(path)
         db.commit()
@@ -161,6 +167,7 @@ def run_ingest(self, job_id: str) -> None:
             job = db.get(IngestJob, job_id)
             if job:
                 job.status = "failed"
+                job.phase = "failed"
                 job.error_message = str(exc)[:500]
                 db.commit()
         except Exception:
@@ -174,6 +181,7 @@ def run_ingest(self, job_id: str) -> None:
                 job.error_message = str(exc)[:500]
                 if self.request.retries >= self.max_retries:
                     job.status = "failed"
+                    job.phase = "failed"
                 db.commit()
         except Exception:
             pass
@@ -185,6 +193,7 @@ def run_ingest(self, job_id: str) -> None:
                 refreshed = db.get(IngestJob, job_id)
                 if refreshed and refreshed.status == "pending":
                     refreshed.status = "failed"
+                    refreshed.phase = "failed"
                     refreshed.error_message = (
                         refreshed.error_message
                         or "Task exited before updating job status (check Celery worker logs)"

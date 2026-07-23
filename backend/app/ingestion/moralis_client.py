@@ -8,11 +8,67 @@ from datetime import datetime, timezone
 import httpx
 from httpx import HTTPStatusError, TransportError
 
+from app.config import get_settings
 from app.ingestion.errors import MoralisApiError
 
 MORALIS_BASE = "https://deep-index.moralis.io/api/v2.2"
 PAGE_SIZE = 100
-RATE_SLEEP = 0.025  # 40 req/s free tier
+MAX_ATTEMPTS = 5
+MAX_BACKOFF = 30.0  # cap on any single retry pause, incl. Retry-After
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+
+def _retry_delay(resp: httpx.Response, attempt: int) -> float:
+    """Backoff before retrying a retryable HTTP status.
+
+    Honors a numeric ``Retry-After`` header when present (Moralis sends one on
+    429), otherwise exponential 1s/2s/4s/..., always capped at MAX_BACKOFF.
+    """
+    retry_after = resp.headers.get("Retry-After")
+    if retry_after is not None:
+        try:
+            return min(max(float(retry_after), 0.0), MAX_BACKOFF)
+        except ValueError:
+            pass  # HTTP-date form — fall through to exponential backoff
+    return min(2.0 ** attempt, MAX_BACKOFF)
+
+
+def _get_with_retry(
+    url: str,
+    params: dict[str, object],
+    api_key: str,
+    timeout: httpx.Timeout,
+) -> httpx.Response:
+    """GET with retries for transport errors and retryable HTTP statuses.
+
+    Transport errors/timeouts and 429/5xx responses are retried up to
+    MAX_ATTEMPTS with backoff; a persistent 429 surfaces as MoralisApiError
+    (rate limit — actionable), other exhausted/non-retryable statuses raise
+    HTTPStatusError as before.
+    """
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            resp = httpx.get(url, params=params, headers={"X-API-Key": api_key}, timeout=timeout)
+        except (TransportError, httpx.TimeoutException):
+            if attempt == MAX_ATTEMPTS - 1:
+                raise
+            time.sleep(min(2.0 ** attempt, MAX_BACKOFF))
+            continue
+
+        if resp.status_code in _RETRYABLE_STATUS and attempt < MAX_ATTEMPTS - 1:
+            time.sleep(_retry_delay(resp, attempt))
+            continue
+
+        if resp.status_code == 429:
+            raise MoralisApiError(
+                f"Moralis rate limit (HTTP 429) persisted after {MAX_ATTEMPTS} attempts "
+                "— reduce request rate (MORALIS_RATE_SLEEP) or upgrade the plan."
+            )
+        resp.raise_for_status()
+        return resp
+
+    raise AssertionError("unreachable")  # loop always returns or raises
+
 
 # Accept common user-facing chain names and map to Moralis identifiers.
 _CHAIN_MAP: dict[str, str] = {
@@ -50,13 +106,12 @@ def _raise_if_empty_collection(
 
     # Cross-check collection stats — empty here means the key cannot read this collection.
     try:
-        stats_resp = httpx.get(
+        stats_resp = _get_with_retry(
             f"{MORALIS_BASE}/nft/{contract}/stats",
             params={"chain": _normalize_chain(chain)},
-            headers={"X-API-Key": api_key},
+            api_key=api_key,
             timeout=httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0),
         )
-        stats_resp.raise_for_status()
         stats = stats_resp.json()
         total = stats.get("total_tokens")
         if total not in (None, "0", 0):
@@ -102,21 +157,12 @@ def fetch_nft_page(
     if cursor:
         params["cursor"] = cursor
 
-    _timeout = httpx.Timeout(connect=15.0, read=60.0, write=10.0, pool=5.0)
-    for attempt in range(3):
-        try:
-            resp = httpx.get(
-                f"{MORALIS_BASE}/nft/{contract}",
-                params=params,
-                headers={"X-API-Key": api_key},
-                timeout=_timeout,
-            )
-            resp.raise_for_status()
-            break
-        except (TransportError, httpx.TimeoutException) as exc:
-            if attempt == 2:
-                raise
-            time.sleep(2 ** attempt)
+    resp = _get_with_retry(
+        f"{MORALIS_BASE}/nft/{contract}",
+        params=params,
+        api_key=api_key,
+        timeout=httpx.Timeout(connect=15.0, read=60.0, write=10.0, pool=5.0),
+    )
 
     data = resp.json()
     if not cursor and not data.get("result"):
@@ -155,11 +201,87 @@ def fetch_nft_page(
                 "trait_value": _normalize_value(attr.get("value")),
             })
 
-    time.sleep(RATE_SLEEP)
+    time.sleep(get_settings().moralis_rate_sleep)
 
     return NftPage(
         tokens=tokens,
         traits=traits,
+        next_cursor=data.get("cursor") or None,
+        total=int(data.get("total") or 0),
+    )
+
+
+@dataclass
+class TransfersPage:
+    transfers: list[dict] = field(default_factory=list)
+    next_cursor: str | None = None
+    total: int = 0
+
+
+def fetch_transfers_page(
+    contract: str,
+    chain: str,
+    api_key: str,
+    cursor: str | None = None,
+    from_block: int | None = None,
+) -> TransfersPage:
+    """Fetch a page of NFT transfers (ownership changes) for the holding-window
+    engine. `from_block` (inclusive) resumes from the last processed block so the
+    poller doesn't re-scan history. Results are ordered oldest-first so callers can
+    apply them chronologically and record a high-water block."""
+    params: dict[str, object] = {
+        "chain": _normalize_chain(chain),
+        "format": "decimal",
+        "order": "ASC",
+        "limit": PAGE_SIZE,
+    }
+    if from_block is not None:
+        params["from_block"] = from_block
+    if cursor:
+        params["cursor"] = cursor
+
+    resp = _get_with_retry(
+        f"{MORALIS_BASE}/nft/{contract}/transfers",
+        params=params,
+        api_key=api_key,
+        timeout=httpx.Timeout(connect=15.0, read=60.0, write=10.0, pool=5.0),
+    )
+
+    data = resp.json()
+    transfers: list[dict] = []
+
+    for item in data.get("result") or []:
+        raw_id = item.get("token_id")
+        try:
+            token_id = int(raw_id)
+        except (ValueError, TypeError):
+            continue
+
+        block_number = item.get("block_number")
+        try:
+            block_number = int(block_number) if block_number is not None else None
+        except (ValueError, TypeError):
+            block_number = None
+
+        log_index = item.get("log_index")
+        try:
+            log_index = int(log_index) if log_index is not None else 0
+        except (ValueError, TypeError):
+            log_index = 0
+
+        transfers.append({
+            "token_id": token_id,
+            "from_address": (item.get("from_address") or "").lower() or None,
+            "to_address": (item.get("to_address") or "").lower() or None,
+            "block_number": block_number,
+            "log_index": log_index,
+            "tx_hash": (item.get("transaction_hash") or "").lower() or None,
+        })
+
+    time.sleep(get_settings().moralis_rate_sleep)
+
+    return TransfersPage(
+        transfers=transfers,
         next_cursor=data.get("cursor") or None,
         total=int(data.get("total") or 0),
     )
@@ -185,21 +307,12 @@ def fetch_sales_page(
     if cursor:
         params["cursor"] = cursor
 
-    _timeout = httpx.Timeout(connect=15.0, read=60.0, write=10.0, pool=5.0)
-    for attempt in range(3):
-        try:
-            resp = httpx.get(
-                f"{MORALIS_BASE}/nft/{contract}/trades",
-                params=params,
-                headers={"X-API-Key": api_key},
-                timeout=_timeout,
-            )
-            resp.raise_for_status()
-            break
-        except (TransportError, httpx.TimeoutException) as exc:
-            if attempt == 2:
-                raise
-            time.sleep(2 ** attempt)
+    resp = _get_with_retry(
+        f"{MORALIS_BASE}/nft/{contract}/trades",
+        params=params,
+        api_key=api_key,
+        timeout=httpx.Timeout(connect=15.0, read=60.0, write=10.0, pool=5.0),
+    )
 
     data = resp.json()
     contract_lc = contract.lower()
@@ -251,7 +364,7 @@ def fetch_sales_page(
             "sold_at": sold_at,
         })
 
-    time.sleep(RATE_SLEEP)
+    time.sleep(get_settings().moralis_rate_sleep)
 
     return SalesPage(
         sales=sales,

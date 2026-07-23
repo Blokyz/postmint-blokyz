@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -35,6 +36,7 @@ from app.api.schemas import (
 )
 from app.claim_signing import backend_signer_address, sign_claim_attestation
 from app.claims.eligibility import evaluate_wallet, find_tier_entry
+from app.claims.onchain import ClaimVerificationError, ReceiptNotFound, verify_claim_tx
 from app.claims.seasons import allocate_nonce, latest_season, record_season
 from app.claims.standings import build_driver, build_standings
 from app.claims.windows import (
@@ -284,8 +286,12 @@ def claim_sign(req: ClaimSignRequest, db: Session = Depends(get_db)) -> ClaimSig
 @router.post("/claim/confirm")
 def claim_confirm(req: ClaimConfirmRequest, db: Session = Depends(get_db)) -> dict:
     """Record a landed on-chain claim tx: marks the wallet's active window as won.
-    Once won (on_chain_tx_hash set) the wallet may start a fresh window for another
-    slot (the no-whale-cap rule)."""
+
+    The tx is verified on-chain first (a genuine ``Claimed`` event on the season
+    manager for this wallet+tier) — the DB is the prize source of truth, so a
+    client-supplied hash is never trusted blindly. The authoritative slot number
+    is read from the event. Once won the wallet may start a fresh window for
+    another slot (the no-whale-cap rule)."""
     row = _active_claim(db, req.contract_address, req.tier, req.wallet_address)
     if row is None:
         raise HTTPException(
@@ -293,10 +299,41 @@ def claim_confirm(req: ClaimConfirmRequest, db: Session = Depends(get_db)) -> di
             detail="No active claim window to confirm for this wallet+tier.",
         )
 
+    season = latest_season(db, req.contract_address)
+    if season is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No season (SetClaimManager) registered for this contract.",
+        )
+
+    try:
+        result = verify_claim_tx(
+            settings.base_sepolia_rpc_url,
+            req.tx_hash,
+            season.manager_address,
+            req.wallet_address,
+            req.tier,
+        )
+    except ReceiptNotFound:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "tx_not_found",
+                "retryable": True,
+                "message": "Claim tx not yet visible on-chain — retry shortly.",
+            },
+        )
+    except ClaimVerificationError as exc:
+        raise HTTPException(status_code=400, detail={"error": "invalid_claim_tx", "message": str(exc)})
+    except httpx.HTTPError:
+        raise HTTPException(
+            status_code=503,
+            detail="Could not reach the chain RPC to verify the claim tx — retry shortly.",
+        )
+
     row.on_chain_tx_hash = req.tx_hash
     row.window_completed = _utcnow()
-    if req.slot_number is not None:
-        row.slot_number = req.slot_number
+    row.slot_number = result["slot_number"]  # authoritative on-chain slot
     try:
         db.commit()
     except IntegrityError:

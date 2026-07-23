@@ -190,18 +190,32 @@ def test_claim_sign_nonce_increments(client, db, atlas_file, monkeypatch):
 # --- confirm + winners + leaderboard ---
 
 
-def test_confirm_records_win_and_frees_window(client, db, atlas_file):
+@pytest.fixture
+def mock_chain(monkeypatch):
+    """Stub on-chain verification so `/claim/confirm` accepts a test tx and
+    reports slot 1 (the real path fetches an eth_getTransactionReceipt)."""
+
+    def _stub(*_a, **_k):
+        return {"slot_number": 1, "nonce": 1, "window_started_at": 0}
+
+    monkeypatch.setattr(claims_mod, "verify_claim_tx", _stub)
+    return _stub
+
+
+def test_confirm_records_win_and_frees_window(client, db, atlas_file, mock_chain):
     atlas_file(window_hours=0)
     _seed_holdings(db, 2)
+    _register_season(client)
     client.post("/claim/submit", json={"contract_address": CONTRACT, "tier": TIER, "wallet_address": WALLET})
 
     tx = "0x" + "ab" * 32
     r = client.post(
         "/claim/confirm",
-        json={"contract_address": CONTRACT, "tier": TIER, "wallet_address": WALLET, "tx_hash": tx, "slot_number": 1},
+        json={"contract_address": CONTRACT, "tier": TIER, "wallet_address": WALLET, "tx_hash": tx},
     )
     assert r.status_code == 200
     assert r.json()["status"] == "won"
+    assert r.json()["slot_number"] == 1  # authoritative slot from the on-chain event
 
     # The won row frees the one-active-window index: a fresh submit starts a new window.
     r2 = client.post("/claim/submit", json={"contract_address": CONTRACT, "tier": TIER, "wallet_address": WALLET})
@@ -219,14 +233,70 @@ def test_confirm_404_without_active_window(client, db, atlas_file):
     assert r.status_code == 404
 
 
-def test_winners_and_leaderboard(client, db, atlas_file):
+def test_confirm_404_without_registered_season(client, db, atlas_file):
+    """An active window but no registered season → can't resolve a manager to verify against."""
+    atlas_file(window_hours=0)
+    _seed_holdings(db, 2)
+    client.post("/claim/submit", json={"contract_address": CONTRACT, "tier": TIER, "wallet_address": WALLET})
+    r = client.post(
+        "/claim/confirm",
+        json={"contract_address": CONTRACT, "tier": TIER, "wallet_address": WALLET, "tx_hash": "0x" + "ab" * 32},
+    )
+    assert r.status_code == 404
+    assert "season" in r.json()["detail"].lower()
+
+
+def test_confirm_400_on_spoofed_tx(client, db, atlas_file, monkeypatch):
+    """A tx that doesn't carry a matching Claimed event is rejected (spoof guard)."""
+    from app.claims.onchain import ClaimVerificationError
+
+    def _reject(*_a, **_k):
+        raise ClaimVerificationError("no matching Claimed event for this wallet + tier")
+
+    monkeypatch.setattr(claims_mod, "verify_claim_tx", _reject)
+    atlas_file(window_hours=0)
+    _seed_holdings(db, 2)
+    _register_season(client)
+    client.post("/claim/submit", json={"contract_address": CONTRACT, "tier": TIER, "wallet_address": WALLET})
+    r = client.post(
+        "/claim/confirm",
+        json={"contract_address": CONTRACT, "tier": TIER, "wallet_address": WALLET, "tx_hash": "0x" + "99" * 32},
+    )
+    assert r.status_code == 400
+    assert r.json()["detail"]["error"] == "invalid_claim_tx"
+    # The window is NOT marked won.
+    assert db.query(Claim).filter(Claim.on_chain_tx_hash.isnot(None)).count() == 0
+
+
+def test_confirm_409_when_tx_not_mined(client, db, atlas_file, monkeypatch):
+    """Receipt not yet available → retryable 409, window left open."""
+    from app.claims.onchain import ReceiptNotFound
+
+    def _pending(*_a, **_k):
+        raise ReceiptNotFound("transaction receipt not available yet")
+
+    monkeypatch.setattr(claims_mod, "verify_claim_tx", _pending)
+    atlas_file(window_hours=0)
+    _seed_holdings(db, 2)
+    _register_season(client)
+    client.post("/claim/submit", json={"contract_address": CONTRACT, "tier": TIER, "wallet_address": WALLET})
+    r = client.post(
+        "/claim/confirm",
+        json={"contract_address": CONTRACT, "tier": TIER, "wallet_address": WALLET, "tx_hash": "0x" + "77" * 32},
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"]["retryable"] is True
+
+
+def test_winners_and_leaderboard(client, db, atlas_file, mock_chain):
     atlas_file(window_hours=0, cap=3)
     _seed_holdings(db, 2)
+    _register_season(client)
     client.post("/claim/submit", json={"contract_address": CONTRACT, "tier": TIER, "wallet_address": WALLET})
     tx = "0x" + "ef" * 32
     client.post(
         "/claim/confirm",
-        json={"contract_address": CONTRACT, "tier": TIER, "wallet_address": WALLET, "tx_hash": tx, "slot_number": 1},
+        json={"contract_address": CONTRACT, "tier": TIER, "wallet_address": WALLET, "tx_hash": tx},
     )
 
     w = client.get(f"/winners/{CONTRACT}")

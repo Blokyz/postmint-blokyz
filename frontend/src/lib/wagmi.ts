@@ -30,10 +30,14 @@ const connectors = connectorsForWallets(
   },
 );
 
+// Optional RPC override (e.g. a local anvil node for end-to-end testing of the
+// lock flow). Blank env vars come through as "" — hence || not ??.
+const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || undefined;
+
 export const wagmiConfig = createConfig({
   chains: [...chains],
   connectors,
-  transports: { [baseSepolia.id]: http() },
+  transports: { [baseSepolia.id]: http(rpcUrl) },
   ssr: true,
 });
 

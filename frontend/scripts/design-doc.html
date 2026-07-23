@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>PostMint Blocky — Technical System Design</title>
+<style>
+  @page { size: A4; margin: 22mm 18mm 22mm 18mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif;
+    color: #1c1f26;
+    font-size: 10.5pt;
+    line-height: 1.55;
+  }
+  .cover {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    page-break-after: always;
+  }
+  .cover .tag {
+    font-size: 11pt;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: #6b7280;
+    margin-bottom: 18px;
+  }
+  .cover h1 {
+    font-size: 34pt;
+    margin: 0 0 8px 0;
+    color: #111827;
+  }
+  .cover h2 {
+    font-size: 15pt;
+    font-weight: 400;
+    color: #4b5563;
+    margin: 0 0 40px 0;
+  }
+  .cover .meta {
+    border-top: 2px solid #111827;
+    padding-top: 14px;
+    font-size: 10pt;
+    color: #4b5563;
+    width: 60%;
+  }
+  .cover .meta div { margin-bottom: 4px; }
+  h1.section {
+    font-size: 18pt;
+    color: #111827;
+    border-bottom: 3px solid #111827;
+    padding-bottom: 6px;
+    margin-top: 0;
+    page-break-before: always;
+  }
+  h1.section:first-of-type { page-break-before: avoid; }
+  h2 {
+    font-size: 13pt;
+    color: #1f2937;
+    margin-top: 22px;
+    margin-bottom: 8px;
+    border-left: 4px solid #2563eb;
+    padding-left: 8px;
+  }
+  h3 {
+    font-size: 11.5pt;
+    color: #1f2937;
+    margin-top: 16px;
+    margin-bottom: 6px;
+  }
+  p { margin: 6px 0; text-align: justify; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 10px 0 14px 0;
+    font-size: 9.3pt;
+  }
+  th, td {
+    border: 1px solid #d1d5db;
+    padding: 5px 8px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: #111827;
+    color: #fff;
+    font-weight: 600;
+  }
+  tr:nth-child(even) td { background: #f3f4f6; }
+  code {
+    font-family: 'Cascadia Code', 'Consolas', monospace;
+    background: #f1f5f9;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 9pt;
+    color: #be185d;
+  }
+  pre {
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 8.8pt;
+    overflow-x: auto;
+    line-height: 1.45;
+    font-family: 'Cascadia Code', 'Consolas', monospace;
+  }
+  pre code { background: none; color: inherit; padding: 0; }
+  .badge {
+    display: inline-block;
+    font-size: 8pt;
+    font-weight: 600;
+    padding: 1px 7px;
+    border-radius: 10px;
+    color: #fff;
+  }
+  .done { background: #15803d; }
+  .progress { background: #b45309; }
+  .planned { background: #6b7280; }
+  .risk-high { background: #b91c1c; }
+  .risk-med { background: #b45309; }
+  .risk-low { background: #6b7280; }
+  ul, ol { margin: 6px 0; padding-left: 22px; }
+  li { margin-bottom: 3px; }
+  .callout {
+    background: #eff6ff;
+    border-left: 4px solid #2563eb;
+    padding: 8px 12px;
+    margin: 10px 0;
+    font-size: 9.5pt;
+  }
+  .callout.warn {
+    background: #fef2f2;
+    border-left: 4px solid #b91c1c;
+  }
+  .flow {
+    background: #0f172a;
+    color: #e2e8f0;
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-family: 'Cascadia Code','Consolas',monospace;
+    font-size: 8.6pt;
+    line-height: 1.6;
+    white-space: pre;
+  }
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 24px;
+  }
+  .footer-note {
+    font-size: 8.5pt;
+    color: #9ca3af;
+    margin-top: 30px;
+  }
+</style>
+</head>
+<body>
+
+<!-- COVER -->
+<div class="cover">
+  <div class="tag">Technical System Design</div>
+  <h1>PostMint Blocky</h1>
+  <h2>Plug-and-Play Post-Mint Set Collection Engine for NFT Projects on Base L2</h2>
+  <div class="meta">
+    <div><strong>Document scope:</strong> Architecture, data pipeline, rarity &amp; set-generation engine, smart contracts, security model, and forward roadmap</div>
+    <div><strong>Status:</strong> Phase 1 (Rarity Audit) complete &middot; Phase 2 (Set Atlas) generation complete &middot; Phase 3 (Eligibility &amp; Claiming) not started</div>
+    <div><strong>Date:</strong> June 2026</div>
+  </div>
+</div>
+
+<!-- 1. OVERVIEW -->
+<h1 class="section">1. System Overview</h1>
+
+<p>PostMint Blocky is a <strong>plug-and-play set-collection layer for existing NFT projects</strong>.
+A project supplies a contract address; the engine ingests the collection's token and trait data,
+computes a statistically- and economically-grounded rarity ranking, and proposes a structured set
+of "collection challenges" (the <strong>Set Atlas</strong>) across eight rarity tiers. Holders race
+to assemble and hold the required NFTs long enough to claim a limited number of prize slots per
+tier, with every claim recorded immutably on-chain.</p>
+
+<p>The system is explicitly <strong>not a minting platform</strong> — no new NFTs are created, burned,
+or locked. It is a competitive metagame layered on top of a collection that already exists, designed
+to re-activate secondary-market trading and community engagement post-mint.</p>
+
+<h2>1.1 Core Design Principles</h2>
+<ul>
+  <li><strong>Reusable NFTs</strong> — holding requirements are checked live; tokens are never burned or escrowed.</li>
+  <li><strong>First-N-wins per tier</strong> — each of the 8 rarity tiers has a configurable cap on winning slots; whoever
+  assembles + holds the qualifying set the required duration first, wins a slot.</li>
+  <li><strong>No artificial per-wallet limits</strong> — a sufficiently large holder can theoretically win multiple slots in
+  the same tier; this is treated as a deliberate design choice, not a bug (see §9 Open Questions).</li>
+  <li><strong>Minimal, trustless on-chain footprint</strong> — only the things that truly need trustlessness (rule
+  commitments, cap enforcement, winner records) live on-chain. Everything computationally expensive
+  (regression, combinatorial search, eligibility scanning) happens off-chain.</li>
+  <li><strong>Project-in-the-loop approval gates</strong> — both the rarity ranking and the generated Set Atlas require
+  explicit human approval from the project before they become binding, with UI-driven tuning at each gate.</li>
+</ul>
+
+<h2>1.2 High-Level Flow</h2>
+<div class="flow">1. Project supplies NFT contract address + chain
+        |
+2. Ingestion: pull all token + trait data (Moralis NFT API v2.2) -> Postgres
+        |
+3. Statistical rarity: -log2(trait frequency), normalised to [0,1]
+        |
+4. Sales ingestion + wash-trade filtering -> OLS/Ridge regression -> market premium score
+        |
+5. Combined ranking = alpha * stat_norm + beta * market_norm  (project-tunable weights)
+        |
+6. RANKING MANIFEST  --[project reviews + approves in UI]-->  approved ranking
+        |
+7. Set Atlas Generator: slice ranking into 8 rarity bands, derive set rules + feasibility
+        |
+8. ATLAS MANIFEST  --[project tunes caps/windows + approves in UI]-->  approved atlas
+        |
+9. Atlas hash committed on-chain via ManifestRegistry (immutable)
+        |
+10. Claim event goes live: holders race to assemble + hold qualifying sets
+        |
+11. Off-chain watcher tracks holding windows via transfer polling
+        |
+12. Backend issues ECDSA eligibility proof once a window completes
+        |
+13. Holder submits claim tx -> SetClaimManager verifies + records winner on-chain
+        |
+14. Winner manifest exported -> vault partner ships physical prizes</div>
+
+<h2>1.3 Technology Stack</h2>
+<table>
+  <tr><th>Layer</th><th>Technology</th><th>Notes</th></tr>
+  <tr><td>Data pipeline</td><td>Python 3.11</td><td>Ingestion, scoring, manifest generation</td></tr>
+  <tr><td>API backend</td><td>FastAPI</td><td>REST API, served via Uvicorn</td></tr>
+  <tr><td>Database</td><td>PostgreSQL 16</td><td>Tokens, traits, sales, claims, ingest jobs</td></tr>
+  <tr><td>Task queue</td><td>Celery + Redis 7</td><td>Restartable / retryable async ingestion jobs</td></tr>
+  <tr><td>NFT data source</td><td>Moralis NFT API v2.2</td><td>Token metadata, traits, ownership, transfers</td></tr>
+  <tr><td>Statistical rarity</td><td>pandas + numpy</td><td>&minus;log&#8322; frequency scoring</td></tr>
+  <tr><td>Market premium</td><td>statsmodels (OLS) + scikit-learn (Ridge)</td><td>Trait price-impact regression</td></tr>
+  <tr><td>Smart contracts</td><td>Solidity ^0.8.24, Foundry, OpenZeppelin 5.x</td><td>Manifest registry, claim management</td></tr>
+  <tr><td>Target chain</td><td>Base L2 (testnet: Base Sepolia, chain id 84532)</td><td>Low-fee claim recording</td></tr>
+  <tr><td>Frontend</td><td>Next.js 14, wagmi + RainbowKit, viem</td><td>Audit &amp; Atlas tuning consoles, wallet connect</td></tr>
+</table>
+
+<!-- 2. DATA PIPELINE -->
+<h1 class="section">2. Data Pipeline &amp; Rarity Engine</h1>
+
+<h2>2.1 Ingestion</h2>
+<p>An async Celery task pulls full token + trait data for a contract via the Moralis NFT API and
+persists it into Postgres. Ingestion progress is tracked in the <code>ingest_jobs</code> table
+(<code>status</code>, <code>progress_pct</code>, <code>error_message</code>, <code>manifest_path</code>),
+allowing the frontend to poll for completion and the pipeline to resume cleanly after a restart.</p>
+
+<h2>2.2 Statistical Rarity (Phase 1)</h2>
+<pre><code>frequency    = token_count / eligible_supply
+stat_rarity  = -log2(frequency)          # information-content of a trait value
+stat_norm    = (x - min) / (max - min)   # normalised to [0,1] across all trait values</code></pre>
+<p>This produces a pure supply-side rarity signal: the rarer a trait value is within the
+collection, the higher its information content.</p>
+
+<h2>2.3 Wash-Trade Detection</h2>
+<p>Before any price-based signal is computed, the sales history is filtered for manipulated trades.
+A sale is flagged if <strong>any</strong> of the following hold:</p>
+<table>
+  <tr><th>Rule</th><th>Logic</th></tr>
+  <tr><td>Self-trade</td><td><code>seller_address == buyer_address</code></td></tr>
+  <tr><td>Pair frequency</td><td>Same two wallets trade the same token &gt;3&times; within a 30-day window</td></tr>
+  <tr><td>Price outlier</td><td>Sale price &gt;10&times; the rolling 7-day price floor for that token/trait</td></tr>
+  <tr><td>Quick flip</td><td>Token re-sold by its buyer within 72 hours</td></tr>
+</table>
+<p>Flagged sales (<code>sales.wash_trade_flag</code>) are excluded from the market-premium regression
+below, but retained in the database for auditability.</p>
+
+<h2>2.4 Market Premium (Phase 1, Step 2)</h2>
+<pre><code>Model: log(sale_price) = alpha + sum(beta_i * trait_i) + gamma * days_since_first + epsilon
+
+beta coefficient = how much that trait shifts log-price
+e^beta           = price multiplier (e.g. beta=2.14 -> buyers pay ~8.5x more)
+market_norm      = (beta - beta_min) / (beta_max - beta_min)
+
+Fallback: switch OLS -> Ridge when n_traits > n_clean_sales * 0.5
+          (avoids an underdetermined / overfit regression on sparse sales data)</code></pre>
+
+<h2>2.5 Combined Ranking</h2>
+<pre><code>combined_score = alpha * stat_norm + beta * market_norm
+Default: alpha = 0.5, beta = 0.5  (project-adjustable via UI sliders)
+Sort descending -> rank 1..N</code></pre>
+<p>The output is the <strong>Ranking Manifest</strong> (<code>output/{contract}_ranking_manifest.json</code>),
+containing the full ranked trait list with <code>stat_norm</code>, <code>market_norm</code>,
+<code>combined_score</code>, the weighting used, and an <code>approval</code> field that is
+<code>null</code> until the project signs off via the Audit UI.</p>
+
+<div class="callout">
+<strong>Approval gate.</strong> The ranking manifest is not binding until a project reviews it in
+the Audit UI (drag-and-drop reordering supported), adjusts <code>alpha</code>/<code>beta</code> if
+desired, and explicitly approves it via <code>POST /audit/approve</code>. The Set Atlas Generator
+(§3) refuses to run against an unapproved ranking manifest.</p>
+</div>
+
+<!-- 3. ATLAS -->
+<h1 class="section">3. Set Atlas Generator</h1>
+
+<p>The Set Atlas Generator (<code>backend/app/atlas/</code>) turns an <strong>approved</strong> ranking
+manifest into a structured set of collection challenges across the project's 8 rarity tiers. This is
+the system's core game-design engine: it must produce challenges that are <em>meaningfully rare</em>
+but not <em>mathematically impossible</em>.</p>
+
+<h2>3.1 The 8 Rarity Tiers</h2>
+<table>
+  <tr><th>Tier</th><th>Default Cap</th><th>Holding Window</th><th>Rank Band (cumulative % of traits)</th></tr>
+  <tr><td>Common</td><td>1,000</td><td>Instant</td><td>50&ndash;100%</td></tr>
+  <tr><td>Uncommon</td><td>750</td><td>24 hours</td><td>30&ndash;50%</td></tr>
+  <tr><td>Rare</td><td>500</td><td>72 hours</td><td>15&ndash;30%</td></tr>
+  <tr><td>Super Rare</td><td>250</td><td>7 days</td><td>7&ndash;15%</td></tr>
+  <tr><td>Ultra Rare</td><td>100</td><td>7 days</td><td>3&ndash;7%</td></tr>
+  <tr><td>Legendary</td><td>50</td><td>14 days</td><td>1&ndash;3%</td></tr>
+  <tr><td>Mythic</td><td>12</td><td>14 days</td><td>0.2&ndash;1%</td></tr>
+  <tr><td>Secret</td><td>1</td><td>14 days</td><td>Top 0.2%</td></tr>
+</table>
+<p>Caps and holding windows are <strong>per-project, per-season configurable defaults</strong> &mdash;
+in practice almost every collection needs hand-tuning (see §3.4).</p>
+
+<h2>3.2 Pipeline Stages</h2>
+<ul>
+  <li><strong><code>bands.py</code> &mdash; <code>slice_into_tiers()</code></strong>: slices the approved
+  trait ranking into 8 disjoint bands using the cumulative rank-% boundaries above.</li>
+  <li><strong><code>pools.py</code></strong>: DB query helpers &mdash; <code>pool_token_count</code>,
+  <code>wallet_counts_for_pool</code>, <code>wallet_owners_for_trait</code> &mdash; used to estimate
+  how many wallets can realistically qualify for a given trait pool.</li>
+  <li><strong><code>rules.py</code></strong>: derives the actual set rule for each tier from one of
+  three archetypes, computes feasibility metrics, and runs ladder detection.</li>
+  <li><strong><code>generator.py</code> &mdash; <code>generate_atlas_manifest()</code></strong>:
+  orchestrates the above into a dict matching <code>schemas/set_manifest.schema.json</code>, merging
+  any per-tier <code>tier_structure</code> overrides supplied by the project.</li>
+</ul>
+
+<h2>3.3 Set Archetypes</h2>
+<table>
+  <tr><th>Archetype</th><th>Rule</th><th>Typically Used For</th></tr>
+  <tr><td>Count-of-pool</td><td>Hold any <code>X</code> NFTs from a trait pool of <code>N</code> values</td><td>Common &rarr; Rare</td></tr>
+  <tr><td>One-of-each</td><td>Hold &ge;1 NFT for <strong>each</strong> of a fixed small combo of <code>K</code> (2&ndash;3) specific trait values</td><td>Super Rare / Ultra Rare / Legendary</td></tr>
+  <tr><td>Apex combo</td><td>Hold <code>X</code> NFTs all drawn from the single rarest pool (count-of-pool, scoped to the rarest band)</td><td>Mythic / Secret</td></tr>
+</table>
+
+<h3>One-of-each: candidate pool vs. fixed combo</h3>
+<p>For the <code>one_of_each</code> archetype, the tier's full band (e.g. 66 traits for Super Rare) is
+only the <strong>candidate pool</strong> &mdash; the actual <code>set_rule.trait_values</code> committed
+to the atlas is a small fixed <code>K</code>=2&ndash;3 combo selected from it. A wallet must hold
+&ge;1 token for <strong>each</strong> of those specific traits to qualify; other traits in the band are
+not part of the challenge.</p>
+<p><code>_select_one_of_each</code> takes the 8 rarest traits in the band, fetches each trait's
+owner set via <code>wallet_owners_for_trait</code>, and searches all <code>K</code>=2 and
+<code>K</code>=3 combinations for the one whose <code>fit_score</code> lands closest to the target
+of 2.0 (preferring the <code>[1.0, 3.0]</code> range), falling back to the combo with the highest
+<code>estimated_qualifiers</code> if no combination has a defined <code>fit_score</code>. This
+search-based selection replaced an earlier version that simply took the 3 globally-rarest traits in
+the band regardless of whether any wallet could ever hold all 3 &mdash; which produced
+<code>estimated_qualifiers = 0</code> / <code>fit_score = null</code> for higher tiers on real
+collections.</p>
+
+<h2>3.4 Feasibility Math</h2>
+<pre><code>max_sets_formable = pool_qualifying_nfts / X
+race_intensity    = estimated_qualifiers / tier_cap
+fit_score         = 1.0 / |log(race_intensity)|     # target range: 1.0 - 3.0
+
+low_feasibility   = True when fit_score falls outside [1.0, 3.0]
+                    (cap drastically over- or under-sized relative to qualifiers)</code></pre>
+<p>The target band of <code>fit_score in [1.0, 3.0]</code> roughly corresponds to "estimated
+qualifiers within a handful to ~20&times; the cap" &mdash; i.e. a real race for a scarce resource,
+rather than a guaranteed claim or a mathematically empty tier. <code>race_intensity = 1</code>
+(exactly one qualifier for one cap slot) is a degenerate case where <code>fit_score</code> is
+undefined per the function's own docstring &mdash; this is expected for a 1-of-1 "grail" Secret tier
+and is treated as a UI/design question, not a bug.</p>
+
+<h2>3.5 Ladder Detection</h2>
+<p><code>detect_ladders()</code> checks for &gt;70% Jaccard overlap in trait pools between adjacent
+tiers with different <code>X</code> values &mdash; e.g. "3 Yellow Apes &rarr; Common, 6 Yellow Apes
+&rarr; Uncommon". In v1 this is typically empty because band-sliced pools are disjoint by
+construction; it exists to surface natural escalation chains if/when pool definitions become less
+strictly band-bound.</p>
+
+<h2>3.6 Tuning Workflow</h2>
+<p>Default tier caps are derived from broad assumptions about trait-distribution width and frequently
+do not fit a specific collection's actual rarity curve &mdash; concentrated collections can produce
+caps 25&ndash;100&times; larger than the realistic qualifier pool for the rarest tiers, making most
+slots mathematically unclaimable. The resolution is <strong>always manual, project-owner-driven
+tuning</strong>:</p>
+<ol>
+  <li><code>POST /atlas/generate</code> produces an initial atlas using <code>DEFAULT_TIER_STRUCTURE</code>.</li>
+  <li>The <strong>Atlas Tier Tuning UI</strong> (<code>/atlas</code>, "Set Atlas // Rarity Console")
+  renders all 8 tiers as colour-coded cards (cold-steel &rarr; solar-flare gradient, Common &rarr;
+  Secret) showing archetype, rule summary, <code>one_of_each</code> trait chips, feasibility metrics,
+  and a fit-score gauge highlighting the <code>[1.0, 3.0]</code> target zone plus a
+  <code>low_feasibility</code> badge.</li>
+  <li>Each tier card has cap / holding-window sliders, guardrailed to a sensible range around the
+  default (e.g. <code>[default &times; 0.25, default &times; 4]</code>), and a "Reset to defaults" action.</li>
+  <li>A global "Regenerate" button re-POSTs all 8 tier overrides via <code>tier_structure</code> and
+  re-renders with fresh feasibility numbers.</li>
+  <li>This loop repeats until the project owner is satisfied that every tier sits in (or
+  deliberately outside, for intentional "grail" tiers) the target fit-score range.</li>
+</ol>
+<p>This tuning step is explicitly <strong>not automated</strong> &mdash; cap/holding-window decisions
+are product/business judgement calls that belong with the project owner, not an auto-tuner.</p>
+
+<!-- 4. DATABASE -->
+<h1 class="section">4. Database Schema</h1>
+<pre><code>-- Token ownership snapshot
+tokens        (contract_address, token_id) PK
+              -&gt; owner_address, snapshot_block
+
+-- One row per trait per token
+traits        (contract_address, token_id, trait_category) PK
+              -&gt; trait_value
+
+-- Secondary market sales
+sales         (id) PK
+              -&gt; contract_address, token_id, sale_price_eth,
+                 seller_address, buyer_address, marketplace,
+                 tx_hash UNIQUE, sold_at, wash_trade_flag
+
+-- Off-chain claim window tracking
+claims        (id) PK | UNIQUE(contract_address, tier, wallet_address)
+              -&gt; window_started, window_completed, slot_number,
+                 qualifying_tokens[], on_chain_tx_hash
+
+-- Async ingestion job tracking
+ingest_jobs   (id) PK
+              -&gt; contract_address, chain, status, progress_pct,
+                 error_message, manifest_path, created_at, updated_at</code></pre>
+
+<h2>4.1 Manifest File Formats</h2>
+<table>
+  <tr><th>Manifest</th><th>Produced By</th><th>Path</th><th>Key Fields</th></tr>
+  <tr>
+    <td>Ranking Manifest</td>
+    <td>Phase 1</td>
+    <td><code>output/{contract}_ranking_manifest.json</code></td>
+    <td><code>manifest_id</code>, <code>collection.{contract_address, chain, eligible_supply}</code>,
+    <code>weights.{alpha, beta}</code>, <code>trait_rankings[]</code> (rank, stat_norm, market_norm,
+    combined_score), <code>approval</code> (null until approved)</td>
+  </tr>
+  <tr>
+    <td>Set Atlas Manifest</td>
+    <td>Phase 2</td>
+    <td><code>output/{contract}_atlas_manifest.json</code></td>
+    <td><code>atlas_manifest_id</code>, <code>ranking_manifest_id</code>, <code>tier_structure</code>
+    (caps + holding_window_hours per tier), <code>tiers[]</code> (set rules, pool, feasibility,
+    alternatives), <code>ladders[]</code></td>
+  </tr>
+  <tr>
+    <td>Winner Manifest</td>
+    <td>Phase 3 (planned)</td>
+    <td><code>output/{contract}_winner_manifest.json</code></td>
+    <td><code>tiers[].winners[]</code> &mdash; slot number, wallet, qualifying tokens, on-chain tx,
+    shipping status</td>
+  </tr>
+</table>
+
+<!-- 5. CONTRACTS -->
+<h1 class="section">5. Smart Contracts (Base L2)</h1>
+<p>All contracts target <strong>Base L2</strong> (testnet: Base Sepolia, chain id <code>84532</code>),
+built with Solidity ^0.8.24, Foundry, and OpenZeppelin 5.x.</p>
+
+<h2>5.1 ManifestRegistry.sol <span class="badge done">BUILT</span></h2>
+<p>Locks the approved atlas hash on-chain &mdash; an immutable, publicly verifiable proof that the
+project agreed to a specific set of rules before the claim race began.</p>
+<pre><code>lockManifest(nftContract, rankingHash, atlasHash)  -&gt; emits ManifestLocked
+verifyAtlas(nftContract, atlasHash)                -&gt; bool
+isLocked(nftContract)                              -&gt; bool</code></pre>
+<div class="callout warn">
+<strong>Known gap &mdash; no access control.</strong> Any wallet can currently call
+<code>lockManifest</code> for any <code>nftContract</code> address. A pre-registration or operator
+whitelist pattern must be added before mainnet (see §8 Security Model).
+</div>
+
+<h2>5.2 SetClaimManager.sol <span class="badge planned">NOT BUILT</span></h2>
+<p>One instance per project per season. Verifies eligibility signatures, enforces tier caps
+atomically, and records winners on-chain.</p>
+<pre><code>claim(tier, qualifyingTokenIds, windowStartedAt, expiry, nonce, signature)</code></pre>
+<p>Validation order: tier exists &rarr; signature not expired &rarr; nonce not used &rarr; wallet has
+not already claimed this tier &rarr; cap not full &rarr; holding window elapsed &rarr; ECDSA
+signature valid (backend signer) &rarr; award slot.</p>
+
+<h2>5.3 SetClaimFactory.sol <span class="badge planned">NOT BUILT</span></h2>
+<p>Deploys a new <code>SetClaimManager</code> per project/season and acts as a registry of all
+seasons.</p>
+<pre><code>deploySeason(nftContract, atlasHash, backendSigner, tierNames, caps, windows) -&gt; address</code></pre>
+
+<!-- 6. ON-CHAIN VS OFF-CHAIN -->
+<h1 class="section">6. On-Chain vs. Off-Chain Split</h1>
+<table>
+  <tr><th>Concern</th><th>Where</th><th>Why</th></tr>
+  <tr><td>Rarity scoring (regression)</td><td>Off-chain</td><td>EVM cannot run OLS/Ridge regression</td></tr>
+  <tr><td>Set atlas generation</td><td>Off-chain</td><td>Combinatorial search is prohibitively expensive on-chain</td></tr>
+  <tr><td>Atlas hash commitment</td><td><strong>On-chain</strong></td><td>Trustless proof the project agreed to the rules</td></tr>
+  <tr><td>Eligibility checking</td><td>Off-chain</td><td>Checking thousands of traits on-chain costs millions of gas</td></tr>
+  <tr><td>Eligibility proof signing</td><td>Off-chain</td><td>~3k gas to verify a signature on-chain vs. millions to compute eligibility</td></tr>
+  <tr><td>Holding-window tracking</td><td>Off-chain</td><td>Event-driven via transfer polling, free</td></tr>
+  <tr><td>Cap enforcement</td><td><strong>On-chain</strong></td><td>Must be trustless &mdash; race conditions on "first N" must be impossible to exploit</td></tr>
+  <tr><td>Claim recording</td><td><strong>On-chain</strong></td><td>Permanent, immutable winner record</td></tr>
+  <tr><td>Winner export</td><td>Off-chain</td><td>Reads on-chain events &rarr; JSON &rarr; vault partner fulfillment</td></tr>
+</table>
+
+<!-- 7. ELIGIBILITY -->
+<h1 class="section">7. Eligibility &amp; Claiming (Planned &mdash; Phase 3)</h1>
+
+<h2>7.1 Eligibility Check (per wallet, per tier)</h2>
+<pre><code>holdings        = current tokens owned by wallet (re-fetched from chain)
+matching_tokens = tokens where any trait matches the tier's pool
+qualifies       = count(matching_tokens) &gt;= X
+progress_pct    = min(100, count / X * 100)
+needed          = max(0, X - count)</code></pre>
+
+<h2>7.2 Holding Window</h2>
+<pre><code>Window starts  -&gt; when wallet first qualifies for a tier
+Window resets  -&gt; if any qualifying token is transferred OUT
+Window expires -&gt; when block.timestamp &gt;= window_started + holding_window_seconds
+Window valid   -&gt; backend signs proof -&gt; wallet submits claim tx</code></pre>
+<p>Transfer detection is planned via <strong>Moralis transfer polling</strong>
+(<code>GET /api/v2.2/nft/{address}/transfers</code> every 30s) &mdash; this has no implementation yet
+and currently blocks the holding-window engine.</p>
+
+<h2>7.3 ECDSA Signing (Backend &harr; Contract Bridge)</h2>
+<p>A backend "hot signer" holds no funds and signs:</p>
+<pre><code>wallet + tier + nftContract + tokenIds + windowStartedAt + expiry + nonce</code></pre>
+<p>Encoding must match <code>abi.encodePacked()</code> in <code>SetClaimManager</code> exactly.
+Signatures are valid for <strong>1 hour</strong> only, and each <code>nonce</code> is single-use.</p>
+
+<!-- 8. SECURITY -->
+<h1 class="section">8. Security Model</h1>
+<table>
+  <tr><th>Concern</th><th>Mitigation</th></tr>
+  <tr><td>Replay attacks</td><td>Every signature includes a unique <code>nonce</code>; the contract stores used nonces</td></tr>
+  <tr><td>Signature expiry</td><td>Valid for max 1 hour; expired signatures revert with a clear message</td></tr>
+  <tr><td>Signer compromise</td><td>Signer wallet holds no ETH &mdash; blast radius is limited to signing ability only</td></tr>
+  <tr><td>Cap race conditions</td><td><code>claimed &lt; cap</code> is checked atomically within the same transaction &mdash; impossible to exceed on-chain</td></tr>
+  <tr><td>Cross-chain trust</td><td>Claims are on Base; NFT data is on Ethereum (for bridged collections). Trust is entirely in the backend signature &mdash; must be explicitly scoped in the security audit</td></tr>
+  <tr><td>ManifestRegistry griefing</td><td><span class="badge risk-high">HIGH</span> Any wallet can currently lock any contract address &mdash; must fix before mainnet</td></tr>
+  <tr><td>Signer key storage</td><td>Must use a secrets vault in production &mdash; never committed to <code>.env</code> in git</td></tr>
+</table>
+<div class="callout warn">
+<strong>External audit required.</strong> <code>SetClaimManager.sol</code> must be reviewed by an
+external security firm before any mainnet deployment.
+</div>
+
+<!-- 9. CURRENT STATUS -->
+<h1 class="section">9. Current Implementation Status</h1>
+
+<table>
+  <tr><th>Area</th><th>Status</th><th>Notes</th></tr>
+  <tr><td>Monorepo skeleton, DB schema, health APIs</td><td><span class="badge done">DONE</span></td><td>Sprint 0</td></tr>
+  <tr><td>ManifestRegistry.sol + tests</td><td><span class="badge done">DONE</span></td><td>No access control yet &mdash; flagged risk</td></tr>
+  <tr><td>Moralis ingestion &rarr; Postgres &rarr; statistical rarity &rarr; ranking manifest</td><td><span class="badge done">DONE</span></td><td>Sprint 1, Phase 1</td></tr>
+  <tr><td>Wash-trade detection + OLS/Ridge market premium + combined ranking</td><td><span class="badge done">DONE</span></td><td>Sprint 1, Phase 2</td></tr>
+  <tr><td>Manifest builder + ranking approval API/UI</td><td><span class="badge done">DONE</span></td><td><code>POST /audit/approve</code> live</td></tr>
+  <tr><td>Set Atlas Generator (<code>bands</code>, <code>pools</code>, <code>rules</code>, <code>generator</code>)</td><td><span class="badge done">DONE</span></td><td>19 passing tests in <code>test_atlas.py</code></td></tr>
+  <tr><td><code>POST /atlas/generate</code>, <code>GET /atlas/preview/{contract}</code></td><td><span class="badge done">DONE</span></td><td>Validates ranking approval + tier overrides</td></tr>
+  <tr><td>Atlas Tier Tuning UI (<code>/atlas</code> Rarity Console)</td><td><span class="badge done">DONE</span></td><td>Sliders, fit-score gauges, Playwright-verified</td></tr>
+  <tr><td><code>POST /atlas/approve</code> + on-chain <code>lockManifest</code> from UI</td><td><span class="badge planned">PLANNED</span></td><td>Sprint 6</td></tr>
+  <tr><td>SetClaimManager.sol / SetClaimFactory.sol</td><td><span class="badge planned">PLANNED</span></td><td>Sprint 5/6 scope, not started</td></tr>
+  <tr><td>Eligibility evaluator + holding-window engine</td><td><span class="badge planned">PLANNED</span></td><td>Sprint 7, blocked on transfer polling</td></tr>
+  <tr><td>Claim signing service + claim routes + winner export</td><td><span class="badge planned">PLANNED</span></td><td>Sprint 8</td></tr>
+  <tr><td>Holder dashboard + leaderboard</td><td><span class="badge planned">PLANNED</span></td><td>Sprint 9</td></tr>
+  <tr><td>External smart-contract audit</td><td><span class="badge planned">PLANNED</span></td><td>Sprint 10+, required before mainnet</td></tr>
+  <tr><td>Mainnet deploy on Base</td><td><span class="badge planned">PLANNED</span></td><td>Sprint 11+, after audit sign-off</td></tr>
+</table>
+
+<h2>9.1 API Surface</h2>
+<table>
+  <tr><th>Method</th><th>Route</th><th>Status</th><th>Purpose</th></tr>
+  <tr><td>POST</td><td><code>/audit/ingest</code></td><td><span class="badge done">DONE</span></td><td>Trigger ingestion for any contract</td></tr>
+  <tr><td>GET</td><td><code>/audit/status/{contract}</code></td><td><span class="badge done">DONE</span></td><td>Ingestion progress</td></tr>
+  <tr><td>GET</td><td><code>/audit/ranking/{contract}</code></td><td><span class="badge done">DONE</span></td><td>Ranked trait list</td></tr>
+  <tr><td>POST</td><td><code>/audit/approve</code></td><td><span class="badge done">DONE</span></td><td>Write approved ranking manifest</td></tr>
+  <tr><td>POST</td><td><code>/atlas/generate</code></td><td><span class="badge done">DONE</span></td><td>Generate atlas from approved ranking manifest</td></tr>
+  <tr><td>GET</td><td><code>/atlas/preview/{contract}</code></td><td><span class="badge done">DONE</span></td><td>Proposed atlas + ladders</td></tr>
+  <tr><td>POST</td><td><code>/atlas/approve</code></td><td><span class="badge planned">PLANNED</span></td><td>Lock frozen manifest + call ManifestRegistry</td></tr>
+  <tr><td>GET</td><td><code>/eligibility/{wallet}</code></td><td><span class="badge planned">PLANNED</span></td><td>Qualifying sets + progress per tier</td></tr>
+  <tr><td>GET</td><td><code>/leaderboard/{tier}</code></td><td><span class="badge planned">PLANNED</span></td><td>Aggregate counts (no wallet IDs)</td></tr>
+  <tr><td>POST</td><td><code>/claim/submit</code></td><td><span class="badge planned">PLANNED</span></td><td>Start holding window</td></tr>
+  <tr><td>POST</td><td><code>/claim/sign</code></td><td><span class="badge planned">PLANNED</span></td><td>Issue ECDSA proof after window completes</td></tr>
+  <tr><td>GET</td><td><code>/claim/status/{wallet}/{tier}</code></td><td><span class="badge planned">PLANNED</span></td><td>Window + slot status</td></tr>
+  <tr><td>GET</td><td><code>/winners/{contract}</code></td><td><span class="badge planned">PLANNED</span></td><td>Winner manifest export</td></tr>
+</table>
+
+<!-- 10. ROADMAP -->
+<h1 class="section">10. Future Plans &amp; Roadmap</h1>
+
+<h2>10.1 Sprint 6 &mdash; Atlas Approval &amp; On-Chain Commitment</h2>
+<ul>
+  <li>Implement <code>POST /atlas/approve</code> to freeze the tuned atlas manifest.</li>
+  <li>Wire the Atlas Tier Tuning UI's approval action to call
+  <code>ManifestRegistry.lockManifest(nftContract, rankingHash, atlasHash)</code> on-chain once a
+  project owner is satisfied with the tuned <code>tier_structure</code>.</li>
+  <li>Add access control to <code>ManifestRegistry</code> (pre-registration or operator whitelist)
+  to close the current griefing gap &mdash; this should land before or alongside this sprint since it
+  is the first sprint that actually exercises <code>lockManifest</code> in anger.</li>
+</ul>
+
+<h2>10.2 Sprint 7 &mdash; Eligibility Evaluator &amp; Holding Windows</h2>
+<ul>
+  <li>Build the eligibility evaluator described in §7.1 (per-wallet, per-tier qualification + progress).</li>
+  <li>Implement transfer polling against Moralis (<code>GET /api/v2.2/nft/{address}/transfers</code>,
+  ~30s interval) to drive holding-window start/reset logic &mdash; currently the single hard
+  blocker for this sprint.</li>
+  <li>Deploy <code>SetClaimFactory.sol</code> + <code>SetClaimManager.sol</code> to Base Sepolia.</li>
+</ul>
+
+<h2>10.3 Sprint 8 &mdash; Signing Service &amp; Claims</h2>
+<ul>
+  <li>Stand up the backend ECDSA signing service (§7.3), including secrets-vault-backed key storage.</li>
+  <li>Implement <code>/claim/submit</code>, <code>/claim/sign</code>, <code>/claim/status</code>.</li>
+  <li>Implement winner manifest export (<code>/winners/{contract}</code>) for vault-partner fulfillment.</li>
+</ul>
+
+<h2>10.4 Sprint 9 &mdash; Holder-Facing Product</h2>
+<ul>
+  <li>Holder dashboard: per-wallet eligibility/progress across all tiers, claim flow UI.</li>
+  <li>Public leaderboard per tier (aggregate counts only, no wallet identities).</li>
+  <li>End-to-end claim flow exercised live on Base Sepolia.</li>
+</ul>
+
+<h2>10.5 Sprint 10+ &mdash; Audit &amp; Mainnet</h2>
+<ul>
+  <li>External security audit of <code>SetClaimManager.sol</code> (and the now-access-controlled
+  <code>ManifestRegistry.sol</code>) &mdash; budget and firm selection still open (§11).</li>
+  <li>Mainnet deployment on Base, gated on audit sign-off.</li>
+</ul>
+
+<h2>10.6 Open Product / Design Questions</h2>
+<p>The Atlas mechanics are implemented and functioning, but the following are business judgement
+calls awaiting project-owner sign-off rather than engineering blockers:</p>
+<ol>
+  <li><strong>Rarity band percentages</strong> &mdash; the tier cumulative boundaries (Secret 0.2%,
+  Mythic 1%, Legendary 3%, Ultra Rare 7%, Super Rare 15%, Rare 30%, Uncommon 50%, Common 100%) are
+  v1 defaults. Do these splits match what should <em>feel</em> rare to collectors across different
+  collections, or do they need per-collection validation?</li>
+  <li><strong><code>fit_score</code> target range <code>[1.0, 3.0]</code></strong> &mdash; defines
+  what counts as a "healthy race." Is this the right competitiveness target for every tier, or
+  should some tiers be deliberately near-impossible "grails" vs. more inclusive?</li>
+  <li><strong><code>one_of_each</code> fixed combo vs. flexible pool</strong> &mdash; Super
+  Rare/Ultra Rare/Legendary currently commit to <em>one</em> fixed 2&ndash;3-trait combo. Should
+  players instead be offered multiple valid combos to choose from?</li>
+  <li><strong>Race vs. raffle for the rarest tier</strong> &mdash; Secret/Mythic tiers can have as
+  few as 1&ndash;2 possible qualifiers competing for a single cap slot. Is "first to assemble and
+  hold" the right mechanic there, or should it be a lottery among all qualifiers?</li>
+</ol>
+
+<!-- 11. OPEN QUESTIONS / RISKS -->
+<h1 class="section">11. Outstanding Open Questions &amp; Risks</h1>
+
+<h2>11.1 Product / Protocol Open Questions</h2>
+<table>
+  <tr><th>#</th><th>Question</th><th>Status</th></tr>
+  <tr><td>1</td><td><strong>Whale multi-claim</strong> &mdash; can one wallet claim multiple slots in the same tier? If yes, the <code>UNIQUE(contract_address, tier, wallet_address)</code> constraint on <code>claims</code> must be removed.</td><td>Needs product decision</td></tr>
+  <tr><td>2</td><td><strong>ManifestRegistry access control</strong> &mdash; pre-registration pattern or platform operator whitelist?</td><td>Needs decision before mainnet</td></tr>
+  <tr><td>3</td><td><strong>Holding windows</strong> &mdash; are the default durations (24h &rarr; 14 days) confirmed, or should each project set its own?</td><td>Open</td></tr>
+  <tr><td>4</td><td><strong>Paid claims</strong> &mdash; does the Atlas UI need a claim-fee field per tier?</td><td>Open</td></tr>
+  <tr><td>5</td><td><strong>Hosting</strong> &mdash; Railway + Supabase, and at what point in the roadmap?</td><td>Open</td></tr>
+  <tr><td>6</td><td><strong>Security audit firm</strong> &mdash; budget and timeline needed ahead of Sprint 10+.</td><td>Open</td></tr>
+</table>
+
+<h2>11.2 Known Bugs / Risks</h2>
+<table>
+  <tr><th>Issue</th><th>Severity</th><th>Plan</th></tr>
+  <tr><td>ManifestRegistry has no access control &mdash; griefing attack possible</td><td><span class="badge risk-high">HIGH</span></td><td>Fix alongside Sprint 6 on-chain lock work</td></tr>
+  <tr><td>Moralis API key required &mdash; ingestion silently fails without it</td><td><span class="badge risk-med">MEDIUM</span></td><td>Add startup config check</td></tr>
+  <tr><td>CORS hardcoded to <code>localhost:3000</code></td><td><span class="badge risk-low">LOW</span></td><td>Config-driven origin list for staging/prod</td></tr>
+  <tr><td>Transfer detection has no implementation yet</td><td><span class="badge risk-low">LOW</span></td><td>Blocks Sprint 7 holding-window engine</td></tr>
+  <tr><td><code>np.float64</code> sale prices passed to psycopg2 raise <code>InvalidSchemaName</code> (numpy2/psycopg2 adapter incompatibility)</td><td><span class="badge risk-med">MEDIUM</span></td><td>Cast to <code>float()</code> before insertion in the wash-trade/market-premium sales path; currently fails 14 tests in <code>test_market_premium.py</code> / <code>test_wash_trade.py</code></td></tr>
+  <tr><td><code>test_run_ingest_persists_all_tokens</code> hangs indefinitely</td><td><span class="badge risk-med">MEDIUM</span></td><td>Likely same numpy issue or an unmocked network call; run with <code>--ignore=tests/test_ingest_task.py</code> until fixed</td></tr>
+</table>
+
+<h2>11.3 Validation Criteria</h2>
+<p>The rarity engine is considered validated when <strong>7 of the top 10 ranked traits match
+documented collector consensus</strong> for at least one reference collection:</p>
+<table>
+  <tr><th>Collection</th><th>Chain</th><th>Why Included</th></tr>
+  <tr><td>BAYC</td><td>Ethereum</td><td>Large, well-documented &mdash; "Solid Gold Fur" = rank 1 is easily verifiable</td></tr>
+  <tr><td>Good Vibes Club</td><td>Ethereum</td><td>Intentionally engineered rarity tiers</td></tr>
+  <tr><td>Quirkies</td><td>Ethereum</td><td>"Diamond" rare class easily verifiable</td></tr>
+  <tr><td>Chimpers</td><td>Ethereum</td><td>Documented Type tier (Divine &rarr; Common)</td></tr>
+  <tr><td>Claynosaurz</td><td>Ethereum (bridged)</td><td>Cross-chain validation</td></tr>
+</table>
+
+<p class="footer-note">PostMint Blocky &mdash; Technical System Design &mdash; generated June 2026.
+This document reflects the implemented system as of the Set Atlas Generator (Phase 2) completion
+and the planned roadmap through Sprint 11+ (mainnet).</p>
+
+</body>
+</html>

@@ -1,0 +1,44 @@
+[
+  {
+    "name": "01-studio-home",
+    "url": "/studio",
+    "httpStatus": 200,
+    "errors": [],
+    "textPreview": "POSTMINT // OPERATOR CONSOLE\nStudio\n0x70…79C8\nRun a collection through the pipeline — ingest & rarity, ranking approval, Set Atlas tuning, then publish it live. Enter the collection's contract to begin.\nOpen console ▸\n// YOUR COLLECTIONS\nBored Ape Yacht Club\n5 tiers · 0/2550 secured\n0xbc4c…f13d\n● Published\n▸\nGood Vibes Club\n5 tiers · 31/2550 secured\n0xb8ea…33c4\n● Published\n▸\n← The Paddock (holder view)"
+  },
+  {
+    "name": "02-pipeline-overview",
+    "url": "/studio/0xb8ea78fcacef50d41375e44e6814ebba36bb33c4",
+    "httpStatus": 200,
+    "errors": [],
+    "textPreview": "Studio\n1 · Ingest\n2 · Approve\n3 · Atlas\n4 · Publish\n0xb8ea…33c4\n0x70…79C8\nPIPELINE · 0XB8EA78FC…33C4\nGood Vibes Club\nView live ▸\n1\nIngest & rarity\n● Done\nTokens, traits, sales fetched; rarity manifest written.\nReview ▸\n2\nApprove ranking\n● Done\nRanking wallet-signed and hashed — ready for Atlas.\nReview ▸\n3\nSet Atlas\n● Done\nTiers generated & tuned — ready to publish / lock.\nReview ▸\n4\nPublish\n● Done\nLive at /c/good-vibes-club — holders can race.\nReview ▸"
+  },
+  {
+    "name": "03-ingest",
+    "url": "/studio/0xb8ea78fcacef50d41375e44e6814ebba36bb33c4/ingest",
+    "httpStatus": 200,
+    "errors": [],
+    "textPreview": "Studio\n1 · Ingest\n2 · Approve\n3 · Atlas\n4 · Publish\n0xb8ea…33c4\n0x70…79C8\nINGEST.SYS // 0XB8EA…33C4\nACQUIRE TARGET\nFAULT\n// TARGET ACQUISITION\nCONTRACT\n0xb8ea78fcacef50d41375e44e6814ebba36bb33c4\nETH\nBASE\nPOLY\nARB\nINITIATE\n▸\nSource chain is where the collection lives — BAYC → ETH. Re-running an active target resumes it from the last cursor.\n⨯\nFAULT\n01\nQueued\n02\nFetching NFTs & traits\n03\nFetching sales history\n04\nScoring rarity & market premium\n// TELEMETRY\nJOB\n79e85075\nPHASE\nFAILED\nRAW PROGRESS\n34%\nSTATUS\nFAILED\n// FAULT TRACE\nClient error '401 Unauthorized' for url 'https://deep-index.moralis.io/api/v2.2/nft/0xb8ea78fcacef50d41375e44e6814ebba36bb33c4?chain=eth&format=decimal&normalizeMetadat"
+  },
+  {
+    "name": "04-approve",
+    "url": "/studio/0xb8ea78fcacef50d41375e44e6814ebba36bb33c4/approve",
+    "httpStatus": 200,
+    "errors": [],
+    "textPreview": "Studio\n1 · Ingest\n2 · Approve\n3 · Atlas\n4 · Publish\n0xb8ea…33c4\n0x70…79C8\nRANKING // RARITY APPROVAL\nAPPROVE RANKING\nReorder and pin traits, set the stat-vs-market blend, then wallet-sign the exact ranking your collection will lock on-chain.\nCOLLECTION\n0xb8ea78fcacef50d41375e44e6814ebba36bb33c4\n● Approved\nTOTAL TRAITS\n814\nCATEGORIES\n5\nSUPPLY\n6,968\nPINNED\n0\nMARKET SIGNAL\n764/814\nAlready approved — re-approving overwrites this hash\nAPPROVER\n0xe781b3c92df28eb70fa9e485c2c4265860bc65ec\nAT\n2026-07-17T03:23:36.164290+00:00\nHASH\n0x3ea2f10021593af6de682aa09fb37b1f1180f859a139ca55979379403f1226dd\nContinue to Set Atlas ▸\nSCORE BLEND\nstat 50% · market 50%\nRANKING — 814 TRAITS\n⠿\n01\nBACKGROUND\nBlurred Jel"
+  },
+  {
+    "name": "05-atlas",
+    "url": "/studio/0xb8ea78fcacef50d41375e44e6814ebba36bb33c4/atlas",
+    "httpStatus": 200,
+    "errors": [],
+    "textPreview": "Studio\n1 · Ingest\n2 · Approve\n3 · Atlas\n4 · Publish\n0xb8ea…33c4\n0x70…79C8\nSET ATLAS · RARITY CONSOLE\nTier Tuning\nCONTRACT\n0xb8ea78fc…33c4\nELIGIBLE SUPPLY\n6,968\nHEALTHY TIERS\n0 / 5\nATLAS ID\ncc43bed4\nCommon\nPOOL COUNT\n1.61\nFIT SCORE\nLow feasibility\n0\n2–5\n6+\nHold ≥1 token(s) bearing any trait from a pool of 407.\nQualifiers\n1,611\nSlots (cap)\n1,000\nPool NFTs\n6,922\nMax sets\n6,922\nSET SIZE\nHOLD 1 TOKEN\nCAP\n1,000\nHOLDING WINDOW\n0H\nReset to defaults\nUncommon\nPOOL COUNT\n0.45\nFIT SCORE\nLow feasibility\n0\n2–5\n6+\nHold ≥2 token(s) bearing any trait from a pool of 162.\nQualifiers\n335\nSlots (cap)\n750\nPool NFTs\n3,110\nMax sets\n1,555\nSET SIZE\nHOLD 2 TOKENS\nCAP\n750\nHOLDING WINDOW\n24H\nReset to defaults\nRare\nPOOL "
+  },
+  {
+    "name": "06-publish",
+    "url": "/studio/0xb8ea78fcacef50d41375e44e6814ebba36bb33c4/publish",
+    "httpStatus": 200,
+    "errors": [],
+    "textPreview": "Studio\n1 · Ingest\n2 · Approve\n3 · Atlas\n4 · Publish\n0xb8ea…33c4\n0x70…79C8\nPUBLISH · 0XB8EA…33C4\nPublish contest\nDisplay name\nSlug · fixed once published\n/c/\nCover image URL · optional\nVisible on The Paddock (holder directory)\nUpdate contest"
+  }
+]

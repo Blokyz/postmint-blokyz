@@ -1,0 +1,20 @@
+import { chromium } from "playwright";
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+const errors = [];
+page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+page.on("pageerror", (e) => errors.push("PAGEERROR: " + String(e)));
+await page.goto("http://localhost:3000/race", { waitUntil: "networkidle", timeout: 90000 });
+const connect = page.locator('button:has-text("Connect Wallet")');
+console.log("connect button present:", await connect.count());
+await connect.first().click();
+await page.waitForTimeout(2500);
+// RainbowKit modal + listed wallet options
+const modal = await page.locator('[data-rk], [role="dialog"]').count();
+const options = await page.locator('[data-testid^="rk-wallet-option-"]').allTextContents().catch(() => []);
+const optIds = await page.locator('[data-testid^="rk-wallet-option-"]').evaluateAll(els => els.map(e => e.getAttribute("data-testid"))).catch(() => []);
+console.log("modal elements:", modal);
+console.log("wallet options:", optIds);
+await page.screenshot({ path: "scripts/connect-modal.png", fullPage: false });
+console.log("console errors:", errors.length ? errors : "none");
+await browser.close();

@@ -1,0 +1,87 @@
+[
+  {
+    "name": "01-holder-directory",
+    "persona": "holder",
+    "url": "/",
+    "httpStatus": 200,
+    "errors": [],
+    "textLen": 155,
+    "textPreview": "POSTMINT // LIVE CONTESTS\nThe Paddock\nFor projects ▸\nConnect Wallet\n○\n◇\n◆\n✦\n✹\n● LIVE\nGOOD VIBES CLUB\n5 tiers · 31 / 2,550 secured\n0 racing now\nENTER RACE ▸"
+  },
+  {
+    "name": "02-holder-landing",
+    "persona": "holder",
+    "url": "/c/good-vibes-club",
+    "httpStatus": 200,
+    "errors": [],
+    "textLen": 587,
+    "textPreview": "Good Vibes Club\nRace\nStandings\nMy Card\n0xf4…8A56\nPOSTMINT // CONTEST\nGood Vibes Club\n○\n◇\n◆\n✦\n✹\nAssemble a qualifying set of Good Vibes Club traits, hold it through the window, and race to be one of the first finishers in your tier. Rarer tiers, bigger prizes.\nENTER THE RACE\n▸\nView standings\n// HOW IT WORKS\n01\nHOLD THE SET\nOwn the qualifying traits for a tier — the rarer the tier, the tougher the set.\n02\nSTART THE CLOCK\nOpt in and hold the set continuously through the tier's holding window.\n03\nCLAIM YOUR SLOT\nFirst N per tier to finish take a prize slot on-chain. No per-wallet cap."
+  },
+  {
+    "name": "03-holder-standings",
+    "persona": "holder",
+    "url": "/c/good-vibes-club/standings",
+    "httpStatus": 200,
+    "errors": [],
+    "textLen": 648,
+    "textPreview": "Good Vibes Club\nRace\nStandings\nMy Card\n0xf4…8A56\nRACE CONTROL // GOOD VIBES CLUB\nChampionship Standings\nSee who's securing crests — or dive into the tier grid.\nSTANDINGS\nTIERS\n⌕\nSHOW\n25\n50\n100\n01\n0x7099…79c8\n120 CP · 6 slots swept\n○\n◇\n◆\n×2\n✦\n✹\n5/5\n02\n0xd8da…6045\n80 CP\n○\n◇\n◆\n✦\n✹\n4/5\n03\n0xabca…abca\n55 CP\n○\n◇\n◆\n✦\n✹\n4/5\n04\n0x1db3…6ee6\n40 CP\n○\n◇\n◆\n✦\n✹\n3/5\n05\n0x2208…3a9d\n30 CP\n○\n◇\n◆\n✦\n✹\n3/5\n06\n0x8ba1…ba72\n20 CP\n○\n◇\n◆\n✦\n✹\n2/5\n07\n0x7d1a…ebb0\n15 CP\n○\n◇\n◆\n✦\n✹\n2/5\n08\n0x0000…05fa\n15 CP\n○\n◇\n◆\n✦\n✹\n2/5\n09\n0x3fc9…7fad\n10 CP · 2 slots swept\n○\n×2\n◇\n◆\n✦\n✹\n1/5\n10\n0x28c6…1d60\n5 CP\n○\n◇\n◆\n✦\n✹\n1/5\n11\n0xbe0e…33e8\n5 CP\n○\n◇\n◆\n✦\n✹\n1/5\n12\n0xf977…acec\n5 CP\n○\n◇\n◆\n✦\n✹\n1/5"
+  },
+  {
+    "name": "04-holder-race",
+    "persona": "holder",
+    "url": "/c/good-vibes-club/race",
+    "httpStatus": 200,
+    "errors": [],
+    "textLen": 1350,
+    "textPreview": "Good Vibes Club\nRace\nStandings\nMy Card\n0xf4…8A56\nRACE CONTROL // GOOD VIBES CLUB\nThe Grid\n0xf41b…8a56\n01\nCOMMON\nCOUNT OF POOL\nSTANDBY\nSET PROGRESS\n250/1\n#5\n#10\n#67\n#102\n#108\n#110\n#111\n#144\n#149\n#202\n+240\n00:00:00\nHOLD WINDOW\nSTART CLOCK ▸\n// GRID\n13 / 1000 slots · 987 open · 0 racing\nP1\n0x7099…79c8\n↗\nP2\n0xd8da…6045\n↗\nP3\n0xabca…abca\n↗\nP4\n0x1db3…6ee6\n↗\nP5\n0x2208…3a9d\n↗\n02\nUNCOMMON\nCOUNT OF POOL\nSTANDBY\nSET PROGRESS\n73/1\n#102\n#144\n#149\n#268\n#404\n#445\n#485\n#740\n#774\n#808\n+63\n1d 00:00:00\nHOLD WINDOW\nSTART CLOCK ▸\n// GRID\n7 / 750 slots · 743 open · 0 racing\nP1\n0x7099…79c8\n↗\nP2\n0xd8da…6045\n↗\nP3\n0xabca…abca\n↗\nP4\n0x1db3…6ee6\n↗\nP5\n0x2208…3a9d\n↗\n03\nRARE\nCOUNT OF POOL\nSTANDBY\nSET PROGRESS\n42/1\n#144\n#202\n#212\n#557\n#606\n#1045\n#1164\n#1181\n#1188\n#2136\n+32\n3d 00:00:00\nHOLD WINDOW\nSTART CLOCK ▸\n// GRID\n6 / 500 slots · 494 open · 0 racing\nP1\n0x7099…79c8\n↗\nP2\n0x7099…79c8\n↗\nP3\n0xd8da…6045\n↗\nP4\n0xabca…abca\n↗\n"
+  },
+  {
+    "name": "05-holder-driver",
+    "persona": "holder",
+    "url": "/c/good-vibes-club/driver/0xf41b389e0c1950dc0b16c9498eae77131cc08a56",
+    "httpStatus": 200,
+    "errors": [],
+    "textLen": 307,
+    "textPreview": "Good Vibes Club\nRace\nStandings\nMy Card\n0xf4…8A56\nRACE CONTROL // DRIVER CARD\n0xf41b…8a56\n0\nCHAMPIONSHIP PTS\n0 crests secured\nRACE FOR MORE ▸\n// TROPHY CABINET\n○\nCOMMON\nQUALIFIED\n250/1 held\n◇\nUNCOMMON\nQUALIFIED\n73/1 held\n◆\nRARE\nQUALIFIED\n42/1 held\n✦\nSUPER RARE\nQUALIFIED\n29/1 held\n✹\nMYTHIC\nQUALIFIED\n4/1 held"
+  },
+  {
+    "name": "06-operator-studio",
+    "persona": "operator",
+    "url": "/studio",
+    "httpStatus": 404,
+    "errors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Error checking Cross-Origin-Opener-Policy: HTTP error! status: 404"
+    ],
+    "textLen": 33,
+    "textPreview": "404\nThis page could not be found."
+  },
+  {
+    "name": "07-operator-ingest",
+    "persona": "operator",
+    "url": "/ingest",
+    "httpStatus": 200,
+    "errors": [],
+    "textLen": 232,
+    "textPreview": "INGEST.SYS // COLLECTION TELEMETRY\nACQUIRE TARGET\nIDLE\n// TARGET ACQUISITION\nCONTRACT\nETH\nBASE\nPOLY\nARB\nINITIATE\n▸\nSource chain is where the collection lives — BAYC → ETH. Re-running an active target resumes it from the last cursor."
+  },
+  {
+    "name": "08-operator-approve",
+    "persona": "operator",
+    "url": "/approve",
+    "httpStatus": 200,
+    "errors": [],
+    "textLen": 180,
+    "textPreview": "RANKING // RARITY APPROVAL\nAPPROVE RANKING\nReorder and pin traits, set the stat-vs-market blend, then wallet-sign the exact ranking your collection will lock on-chain.\nLoad ranking"
+  },
+  {
+    "name": "09-operator-atlas",
+    "persona": "operator",
+    "url": "/atlas",
+    "httpStatus": 200,
+    "errors": [],
+    "textLen": 53,
+    "textPreview": "SET ATLAS · RARITY CONSOLE\nTier Tuning\nGenerate atlas"
+  }
+]

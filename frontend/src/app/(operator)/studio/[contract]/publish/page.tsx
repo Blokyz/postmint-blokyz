@@ -5,11 +5,13 @@
 // availability live against GET /collections/{slug}, and puts the contest on the
 // holder directory. Slug is immutable once set: re-publishing keeps it.
 
+import { ConnectButton } from "@rainbow-me/rainbowkit";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useAccount, useSignMessage } from "wagmi";
 import { apiGet, ApiError, API_URL, shortAddr } from "@/lib/api";
-import { Collection, listAllCollections, publishCollection } from "@/lib/collections";
+import { buildPublishMessage, Collection, listAllCollections, publishCollection } from "@/lib/collections";
 
 // Client mirror of backend collections_registry.slugify (preview only — the
 // backend validates authoritatively).
@@ -44,6 +46,8 @@ type Avail = "idle" | "checking" | "free" | "taken" | "invalid";
 export default function PublishPage() {
   const params = useParams();
   const contract = String(params.contract ?? "").toLowerCase();
+  const { address, isConnected } = useAccount();
+  const { signMessageAsync } = useSignMessage();
 
   const [gate, setGate] = useState<"loading" | "no-atlas" | "ready">("loading");
   const [existing, setExisting] = useState<Collection | null>(null);
@@ -126,18 +130,38 @@ export default function PublishPage() {
     setSubmitting(true);
     setError(null);
     try {
+      const name = displayName.trim();
+      // The backend uses `req.slug or ""`, so sign "" on re-publish (slug omitted).
+      const signedSlug = existing ? "" : slug;
+
+      // Operator authorization: sign the publish message when a wallet is
+      // connected. Harmless in dev (allowlist off → backend ignores it); required
+      // once the platform sets its operator allowlist.
+      let auth: { operator_address?: string; signature?: string } = {};
+      if (isConnected && address) {
+        const signature = await signMessageAsync({
+          message: buildPublishMessage(contract, signedSlug, name),
+        });
+        auth = { operator_address: address, signature };
+      }
+
       const col = await publishCollection({
         contract_address: contract,
-        display_name: displayName.trim(),
+        display_name: name,
         // Only send slug for a first publish — re-publish keeps the existing one.
         ...(existing ? {} : { slug }),
         ...(imageUrl.trim() ? { image_url: imageUrl.trim() } : {}),
         published,
+        ...auth,
       });
       setDone(col);
       setExisting(col);
     } catch (e2) {
-      setError(e2 instanceof ApiError ? e2.message : e2 instanceof Error ? e2.message : "Publish failed");
+      if (e2 instanceof Error && /User rejected|denied|rejected the request/i.test(e2.message)) {
+        setError("Signature rejected in your wallet — publishing needs your signature.");
+      } else {
+        setError(e2 instanceof ApiError ? e2.message : e2 instanceof Error ? e2.message : "Publish failed");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -224,8 +248,21 @@ export default function PublishPage() {
             <span>Visible on The Paddock (holder directory)</span>
           </label>
 
+          {!isConnected && (
+            <div className="pub-connect">
+              <span className="pub-fixed">Connect your operator wallet to sign the publish.</span>
+              <ConnectButton accountStatus="address" chainStatus="none" showBalance={false} />
+            </div>
+          )}
+
           <button type="submit" className="pub-submit" disabled={!canSubmit}>
-            {submitting ? "Publishing…" : existing ? "Update contest" : "Publish contest"}
+            {submitting
+              ? isConnected
+                ? "Signing & publishing…"
+                : "Publishing…"
+              : existing
+                ? "Update contest"
+                : "Publish contest"}
           </button>
           {error && <p className="studio-error">{error}</p>}
         </form>

@@ -27,7 +27,18 @@ export type PublishRequest = {
   slug?: string;
   image_url?: string;
   published?: boolean;
+  // Operator authorization (only enforced when the backend allowlist is set).
+  operator_address?: string;
+  signature?: string;
 };
+
+// Byte-for-byte mirror of backend app/signing.py:build_publish_message. Keep in
+// lockstep — the backend recovers the signer from these exact bytes. `slug` must
+// be what the request sends: the chosen slug on first publish, "" on re-publish
+// (the backend uses `req.slug or ""`).
+export function buildPublishMessage(contract: string, slug: string, displayName: string): string {
+  return `PostMint collection publish\ncontract:${contract.toLowerCase()}\nslug:${slug}\nname:${displayName}`;
+}
 
 // Resolve a slug → collection. Throws ApiError(404) if the slug is free.
 export const getCollection = (slug: string) => apiGet<Collection>(`/collections/${slug}`);

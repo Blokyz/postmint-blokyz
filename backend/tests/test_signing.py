@@ -6,8 +6,10 @@ from eth_account.messages import encode_defunct
 
 from app.signing import (
     build_approval_message,
+    build_ingest_message,
     build_publish_message,
     recover_approval_signer,
+    recover_ingest_signer,
     recover_publish_signer,
 )
 
@@ -98,3 +100,28 @@ def test_publish_signature_bound_to_slug_and_name():
     # A signature for one slug/name doesn't recover the signer for another.
     assert recover_publish_signer(_CONTRACT, "evil-slug", "Good Vibes", sig) != _ADDR
     assert recover_publish_signer(_CONTRACT, "good-vibes", "Evil Name", sig) != _ADDR
+
+
+# --- ingest message (operator authorization) ---
+
+_ISSUED_AT = 1754200000
+
+
+def test_ingest_message_lowercases_contract_and_binds_fields():
+    msg = build_ingest_message(_CONTRACT.upper(), "eth", _ISSUED_AT)
+    assert _CONTRACT in msg  # lowercased
+    assert "chain:eth" in msg
+    assert f"issued_at:{_ISSUED_AT}" in msg
+
+
+def test_ingest_roundtrip_recovers_signer():
+    msg = build_ingest_message(_CONTRACT, "eth", _ISSUED_AT)
+    assert recover_ingest_signer(_CONTRACT, "eth", _ISSUED_AT, _sign(msg)) == _ADDR
+
+
+def test_ingest_signature_bound_to_chain_and_timestamp():
+    sig = _sign(build_ingest_message(_CONTRACT, "eth", _ISSUED_AT))
+    # A signature for one chain/timestamp doesn't recover the signer for another
+    # (this is what makes the replay window real — re-stamping needs a re-sign).
+    assert recover_ingest_signer(_CONTRACT, "base", _ISSUED_AT, sig) != _ADDR
+    assert recover_ingest_signer(_CONTRACT, "eth", _ISSUED_AT + 1, sig) != _ADDR

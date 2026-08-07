@@ -26,11 +26,17 @@ def pool_token_count(db: Session, contract: str, pool: Pool) -> int:
     return count or 0
 
 
-def wallet_counts_for_pool(db: Session, contract: str, pool: Pool) -> dict[str, int]:
-    """Map wallet -> count of distinct tokens it holds with a trait in `pool`."""
+def wallet_counts_for_pool(
+    db: Session, contract: str, pool: Pool, exclude_token_ids: set[int] | None = None
+) -> dict[str, int]:
+    """Map wallet -> count of distinct tokens it holds with a trait in `pool`.
+
+    `exclude_token_ids` drops specific tokens from the count — used by the race
+    surfaces to ignore tokens already consumed by a won claim in the tier
+    (atlas feasibility passes nothing: it estimates the pre-season universe)."""
     if not pool:
         return {}
-    rows = db.execute(
+    stmt = (
         select(Token.owner_address, func.count(func.distinct(Trait.token_id)))
         .join(
             Trait,
@@ -40,8 +46,10 @@ def wallet_counts_for_pool(db: Session, contract: str, pool: Pool) -> dict[str, 
         .where(Token.contract_address == contract)
         .where(Token.owner_address.is_not(None))
         .where(tuple_(Trait.trait_category, Trait.trait_value).in_(pool))
-        .group_by(Token.owner_address)
-    ).all()
+    )
+    if exclude_token_ids:
+        stmt = stmt.where(Token.token_id.not_in(exclude_token_ids))
+    rows = db.execute(stmt.group_by(Token.owner_address)).all()
     return {row[0]: row[1] for row in rows}
 
 

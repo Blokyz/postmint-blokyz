@@ -7,17 +7,22 @@ Postgres (the test DB) and exercise the actual ownership/trait queries.
 import pytest
 
 from app.claims.eligibility import (
+    consumed_token_ids,
     evaluate_tier,
     evaluate_wallet,
     find_tier_entry,
     matching_token_ids,
+    pool_traits_with_rarity,
+    shopping_guidance_for_wallet,
     tier_progress,
+    unowned_candidate_tokens,
 )
-from app.db.models import Token, Trait
+from app.db.models import Claim, Token, Trait
 
 WALLET = "0x00000000000000000000000000000000000000a1"
 OTHER = "0x00000000000000000000000000000000000000b2"
 CONTRACT = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
 
 
 # --- pure §11 progress math ---
@@ -176,3 +181,149 @@ def test_evaluate_wallet_all_tiers(db):
     assert [r.tier for r in results] == ["Common", "Mythic"]
     assert results[0].qualifies is True
     assert results[1].qualifies is False
+
+
+def test_unowned_candidate_tokens(db):
+    _seed(
+        db,
+        owner_map={1: WALLET, 2: OTHER, 3: OTHER},
+        token_traits={
+            1: [("Hat", "Gold")],
+            2: [("Hat", "Gold")],
+            3: [("Hat", "Silver")],
+        },
+    )
+    pool = [("Hat", "Gold"), ("Hat", "Silver")]
+    candidates = unowned_candidate_tokens(db, CONTRACT, WALLET, pool)
+    assert candidates == [2, 3]
+
+
+def test_pool_traits_with_rarity(db):
+    _seed(
+        db,
+        owner_map={1: WALLET, 2: OTHER, 3: OTHER},
+        token_traits={
+            1: [("Hat", "Gold")],
+            2: [("Hat", "Gold")],
+            3: [("Hat", "Silver")],
+        },
+    )
+    pool = [("Hat", "Silver"), ("Hat", "Gold")]
+    traits = pool_traits_with_rarity(db, CONTRACT, pool)
+    # Gold has 2 occurrences, Silver has 1 — Gold should be first
+    assert traits[0]["trait_value"] == "Gold"
+    assert traits[0]["token_count"] == 2
+    assert traits[1]["trait_value"] == "Silver"
+    assert traits[1]["token_count"] == 1
+
+
+# --- set consumption (2026-08-05): tokens behind a WON claim are spent per tier ---
+
+
+def _won_claim(db, tier, wallet, tokens, tx="0x" + "ab" * 32, slot=1):
+    db.add(
+        Claim(
+            contract_address=CONTRACT,
+            tier=tier,
+            wallet_address=wallet,
+            qualifying_tokens=tokens,
+            on_chain_tx_hash=tx,
+            slot_number=slot,
+        )
+    )
+    db.commit()
+
+
+def test_won_claim_consumes_set_for_that_tier(db):
+    _seed(
+        db,
+        owner_map={1: WALLET, 2: WALLET},
+        token_traits={1: [("Hat", "Gold")], 2: [("Hat", "Gold")]},
+    )
+    entry = _count_tier([("Hat", "Gold")], 2)
+    assert evaluate_tier(db, CONTRACT, WALLET, entry).qualifies is True
+
+    _won_claim(db, "Rare", WALLET, [1, 2])
+    elig = evaluate_tier(db, CONTRACT, WALLET, entry)
+    assert elig.qualifies is False
+    assert elig.held_count == 0
+    assert elig.qualifying_token_ids == []
+    assert elig.needed == 2
+
+
+def test_consumption_is_per_tier_not_cross_tier(db):
+    _seed(db, owner_map={1: WALLET}, token_traits={1: [("Hat", "Gold")]})
+    _won_claim(db, "Rare", WALLET, [1])
+    # Same token still qualifies the wallet in a DIFFERENT tier.
+    other = _count_tier([("Hat", "Gold")], 1, tier="Common")
+    assert evaluate_tier(db, CONTRACT, WALLET, other).qualifies is True
+
+
+def test_consumption_follows_token_across_transfer(db):
+    # WALLET won with token 1, then sold it to OTHER — OTHER can't reuse it here.
+    _seed(db, owner_map={1: OTHER}, token_traits={1: [("Hat", "Gold")]})
+    _won_claim(db, "Rare", WALLET, [1])
+    elig = evaluate_tier(db, CONTRACT, OTHER, _count_tier([("Hat", "Gold")], 1))
+    assert elig.qualifies is False
+
+
+def test_unconfirmed_sign_row_does_not_consume(db):
+    _seed(db, owner_map={1: WALLET}, token_traits={1: [("Hat", "Gold")]})
+    db.add(
+        Claim(
+            contract_address=CONTRACT,
+            tier="Rare",
+            wallet_address=WALLET,
+            qualifying_tokens=[1],
+            on_chain_tx_hash=None,  # signed but never landed
+        )
+    )
+    db.commit()
+    assert consumed_token_ids(db, CONTRACT, "Rare") == set()
+    assert evaluate_tier(db, CONTRACT, WALLET, _count_tier([("Hat", "Gold")], 1)).qualifies is True
+
+
+def test_fresh_disjoint_set_qualifies_again(db):
+    _seed(
+        db,
+        owner_map={1: WALLET, 2: WALLET, 3: WALLET, 4: WALLET},
+        token_traits={n: [("Hat", "Gold")] for n in (1, 2, 3, 4)},
+    )
+    _won_claim(db, "Rare", WALLET, [1, 2])
+    elig = evaluate_tier(db, CONTRACT, WALLET, _count_tier([("Hat", "Gold")], 2))
+    assert elig.qualifies is True
+    assert elig.qualifying_token_ids == [3, 4]  # only the unspent tokens
+
+
+def test_shopping_guidance_for_wallet(db):
+    _seed(
+        db,
+        owner_map={1: WALLET, 2: OTHER, 3: OTHER},
+        token_traits={
+            1: [("Hat", "Gold")],
+            2: [("Hat", "Gold")],
+            3: [("Hat", "Gold"), ("Background", "Blue")],
+        },
+    )
+    manifest = {
+        "tiers": [
+            _count_tier([("Hat", "Gold")], 1, tier="Common"),
+            _count_tier([("Hat", "Gold")], 3, tier="Super Rare"),
+            _count_tier([("Hat", "Gold"), ("Background", "Blue")], 3, tier="Mythic"),
+        ]
+    }
+    guidance = shopping_guidance_for_wallet(db, CONTRACT, WALLET, manifest, chain="base")
+    assert guidance["chain"] == "base"
+    # Common is qualified (held 1, needed 0) so it shouldn't be in short_tiers
+    tier_names = [st["tier"] for st in guidance["short_tiers"]]
+    assert "Common" not in tier_names
+    assert "Super Rare" in tier_names
+    assert "Mythic" in tier_names
+
+    sr = next(st for st in guidance["short_tiers"] if st["tier"] == "Super Rare")
+    assert sr["needed"] == 2
+    assert sr["candidate_token_ids"] == [2, 3]
+    # Check cross tier impact on Mythic
+    assert len(sr["cross_tier_impact"]) > 0
+    assert sr["cross_tier_impact"][0]["tier"] == "Mythic"
+

@@ -20,7 +20,7 @@ from app.config import get_settings
 from app.db.models import IngestJob
 from app.db.session import get_db
 from app.manifests import atomic_write_json, blend_combined_score, compute_manifest_hash
-from app.signing import recover_approval_signer
+from app.signing import recover_approval_signer, recover_ingest_signer
 from app.tasks.ingest import run_ingest
 
 router = APIRouter(prefix="/audit", tags=["audit"])
@@ -47,10 +47,37 @@ def _resume_response(existing: IngestJob) -> IngestResponse:
     )
 
 
+def _assert_ingest_authorized(req: IngestRequest) -> None:
+    """Operator gate for starting an ingestion (enforced only when the allowlist
+    is configured; open in dev/test). The operator wallet-signs the ingest
+    message — contract + chain + issued_at — and must be allowlisted. The
+    timestamp bounds replay: approve/publish signatures are bound to unique
+    content, but an ingest message would otherwise be reusable forever."""
+    if not get_settings().operator_allowlist_set:
+        return
+    if not req.operator_address or not req.signature or req.issued_at is None:
+        raise HTTPException(status_code=401, detail="Operator signature required to ingest.")
+    now = int(datetime.now(timezone.utc).timestamp())
+    ttl = get_settings().ingest_sig_ttl_seconds
+    if now - req.issued_at > ttl:
+        raise HTTPException(status_code=401, detail="Ingest authorization expired — sign again.")
+    if req.issued_at > now + 120:  # small allowance for client clock skew
+        raise HTTPException(status_code=401, detail="Ingest authorization is future-dated.")
+    try:
+        signer = recover_ingest_signer(req.contract_address, req.chain, req.issued_at, req.signature)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Malformed or undecodable signature.")
+    if signer != req.operator_address.lower():
+        raise HTTPException(status_code=401, detail="Signature does not match operator_address.")
+    assert_operator(signer)
+
+
 @router.post("/ingest", response_model=IngestResponse)
 def ingest(req: IngestRequest, db: Session = Depends(get_db)) -> IngestResponse:
     if not settings.moralis_api_key:
         raise HTTPException(status_code=503, detail="MORALIS_API_KEY is not configured.")
+
+    _assert_ingest_authorized(req)
 
     # Resume if an active job already exists for this contract.
     existing = _active_job(db, req.contract_address)

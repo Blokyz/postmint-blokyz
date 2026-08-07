@@ -7,7 +7,7 @@ from app.config import get_settings
 settings = get_settings()
 
 app = FastAPI(
-    title="Post-Mint Set Collection Engine",
+    title="Post-Mint Set Collection Engine v2",
     description="Ingestion, rarity audit, atlas, eligibility, and claim signing API",
     version="0.1.0",
 )

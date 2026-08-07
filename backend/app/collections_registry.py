@@ -14,14 +14,16 @@ import unicodedata
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.claims.standings import build_standings
+from app.claims.standings import qualified_wallets, tier_fill_counts
+from app.config import get_settings
 from app.db.models import Collection, IngestJob
 from app.manifests import load_atlas_manifest
+from app.ttl_cache import race_cache
 
 # Slugs live under /c/, but still keep them clear of app-reserved words so a slug
 # can never shadow a real route even if the prefix is dropped later.
 RESERVED_SLUGS = {
-    "c", "studio", "api", "admin", "app", "race", "standings", "driver",
+    "c", "studio", "paddock", "api", "admin", "app", "race", "standings", "driver",
     "collections", "collection", "health", "audit", "atlas", "claim", "claims",
     "winners", "eligibility", "leaderboard", "season", "seasons", "_next",
     "static", "favicon.ico", "robots.txt", "sitemap.xml",
@@ -139,18 +141,43 @@ def _status(total_cap: int, total_filled: int) -> str:
     return "live"
 
 
-def collection_summary(db: Session, col: Collection) -> dict:
-    """Directory-card rollup: tier count + slot totals + racing count + status,
-    from the collection's atlas manifest and claims (reuses build_standings)."""
-    tier_count = total_cap = total_filled = racers = 0
-    manifest = load_atlas_manifest(col.contract_address)
-    if manifest is not None:
-        st = build_standings(db, col.contract_address, manifest)
-        tier_count = len(st["tiers"])
-        total_cap = sum(t["cap"] for t in st["tiers"])
-        total_filled = sum(t["slots_filled"] for t in st["tiers"])
-        racers = sum(t["racers"] for t in st["tiers"])
+def _claims_rollup(db: Session, contract: str) -> dict:
+    """Tier count + slot totals + racing count from the atlas manifest and one
+    aggregate claims query. TTL-cached — the directory calls this once per
+    collection per request, so uncached it is O(collections x claims)."""
+    key = ("summary", contract)
+    cached = race_cache.get(key, get_settings().standings_cache_ttl_seconds)
+    if cached is not None:
+        return cached
 
+    tier_count = total_cap = total_filled = racers = 0
+    manifest = load_atlas_manifest(contract)
+    if manifest is not None:
+        tier_structure = manifest.get("tier_structure", {})
+        tiers = manifest.get("tiers", [])
+        fill = tier_fill_counts(db, contract)  # {tier: won count}
+        tier_count = len(tiers)
+        for t in tiers:
+            tier = t.get("tier")
+            total_cap += int((tier_structure.get(tier, {}) or {}).get("cap", 0))
+            total_filled += fill.get(tier, 0)
+            # Derived-window model: racers = wallets currently holding the
+            # qualifying set (summed per tier, like the standings board).
+            racers += len(qualified_wallets(db, contract, t))
+
+    rollup = {
+        "tier_count": tier_count,
+        "total_cap": total_cap,
+        "total_filled": total_filled,
+        "racers": racers,
+    }
+    race_cache.set(key, rollup)
+    return rollup
+
+
+def collection_summary(db: Session, col: Collection) -> dict:
+    """Directory-card rollup: collection row fields + the cached claims rollup."""
+    rollup = _claims_rollup(db, col.contract_address)
     return {
         "slug": col.slug,
         "display_name": col.display_name,
@@ -158,11 +185,8 @@ def collection_summary(db: Session, col: Collection) -> dict:
         "chain": col.chain,
         "image_url": col.image_url,
         "published": col.published,
-        "tier_count": tier_count,
-        "total_cap": total_cap,
-        "total_filled": total_filled,
-        "racers": racers,
-        "status": _status(total_cap, total_filled),
+        **rollup,
+        "status": _status(rollup["total_cap"], rollup["total_filled"]),
     }
 
 

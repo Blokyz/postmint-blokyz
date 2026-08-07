@@ -122,6 +122,19 @@ def test_feasibility_zero_qualifiers_is_zero_fit():
     f = feasibility(pool_qty=10, estimated_qualifiers=0, cap=10, x=1)
     assert f["race_intensity"] == 0
     assert f["fit_score"] == 0
+    assert f["suggested_cap"] is None  # no cap makes an empty race healthy
+
+
+def test_feasibility_suggested_cap_hits_target_band():
+    """suggested_cap = qualifiers / 3.0 target, clamped >= 1 — applying it must
+    land the fit inside the healthy [2, 5] band."""
+    for qualifiers in (3, 41, 337, 4743):
+        f = feasibility(pool_qty=qualifiers * 2, estimated_qualifiers=qualifiers, cap=999, x=1)
+        s = f["suggested_cap"]
+        assert s >= 1
+        assert 2.0 <= qualifiers / s <= 5.0
+    # Tiny fields clamp to cap 1 (3 qualifiers / 1 slot = fit 3.0).
+    assert feasibility(pool_qty=6, estimated_qualifiers=3, cap=13, x=1)["suggested_cap"] == 1
 
 
 def test_feasibility_balanced_ratio_is_defined():

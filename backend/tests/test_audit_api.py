@@ -1,6 +1,7 @@
 """Integration tests for the /audit API routes — require a live postmint_test DB."""
 
 import json
+import time
 import uuid
 from pathlib import Path
 from unittest.mock import patch
@@ -10,9 +11,10 @@ from eth_account import Account
 from eth_account.messages import encode_defunct
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.db.models import IngestJob
 from app.manifests import compute_manifest_hash
-from app.signing import build_approval_message
+from app.signing import build_approval_message, build_ingest_message
 
 _CONTRACT = "0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d"
 _CONTRACT_MIXED = "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"  # mixed-case input
@@ -106,6 +108,71 @@ def test_ingest_does_not_deduplicate_complete_job(client, db):
 def test_ingest_invalid_address_rejected(client):
     r = client.post("/audit/ingest", json={"contract_address": "not-an-address", "chain": "eth"})
     assert r.status_code == 422
+
+
+# ── POST /audit/ingest — operator authorization (enforce-when-configured) ──────
+# Keys (_APPROVER_KEY / _OTHER_KEY) are defined in the approve section below;
+# module globals resolve at call time so the order is harmless.
+
+def _signed_ingest_payload(contract=_CONTRACT, chain="eth", issued_at=None, key=None, operator=None):
+    key = key or _APPROVER_KEY
+    issued_at = issued_at if issued_at is not None else int(time.time())
+    msg = build_ingest_message(contract, chain, issued_at)
+    sig = Account.sign_message(encode_defunct(text=msg), private_key=key).signature.hex()
+    return {
+        "contract_address": contract,
+        "chain": chain,
+        "operator_address": operator or Account.from_key(key).address.lower(),
+        "signature": sig if sig.startswith("0x") else "0x" + sig,
+        "issued_at": issued_at,
+    }
+
+
+def test_ingest_authorized_when_signer_allowlisted(client, db, monkeypatch):
+    monkeypatch.setattr(get_settings(), "operator_allowlist", _APPROVER)
+    with patch("app.api.audit.run_ingest.delay"):
+        r = client.post("/audit/ingest", json=_signed_ingest_payload())
+    assert r.status_code == 200, r.text
+
+
+def test_ingest_rejected_when_signer_not_allowlisted(client, db, monkeypatch):
+    """Validly signed but not an operator → authenticated, not authorized (403)."""
+    monkeypatch.setattr(get_settings(), "operator_allowlist", _OTHER_ADDRESS)
+    r = client.post("/audit/ingest", json=_signed_ingest_payload())  # signed by _APPROVER
+    assert r.status_code == 403
+
+
+def test_ingest_unsigned_rejected_when_gated(client, db, monkeypatch):
+    monkeypatch.setattr(get_settings(), "operator_allowlist", _APPROVER)
+    r = client.post("/audit/ingest", json={"contract_address": _CONTRACT, "chain": "eth"})
+    assert r.status_code == 401
+
+
+def test_ingest_stale_signature_rejected(client, db, monkeypatch):
+    """issued_at older than the TTL → the captured signature has gone stale."""
+    monkeypatch.setattr(get_settings(), "operator_allowlist", _APPROVER)
+    stale = int(time.time()) - get_settings().ingest_sig_ttl_seconds - 60
+    r = client.post("/audit/ingest", json=_signed_ingest_payload(issued_at=stale))
+    assert r.status_code == 401
+    assert "expired" in r.json()["detail"].lower()
+
+
+def test_ingest_forged_operator_address_rejected(client, db, monkeypatch):
+    """Claims the allowlisted operator but signs with a different key — the
+    recovered signer won't match, so the request is rejected (the forgery a
+    plain address field would allow)."""
+    monkeypatch.setattr(get_settings(), "operator_allowlist", _APPROVER)
+    r = client.post("/audit/ingest", json=_signed_ingest_payload(key=_OTHER_KEY, operator=_APPROVER))
+    assert r.status_code == 401
+
+
+def test_ingest_tampered_chain_rejected(client, db, monkeypatch):
+    """Sign for one chain, submit another — the message changes, recovery fails."""
+    monkeypatch.setattr(get_settings(), "operator_allowlist", _APPROVER)
+    payload = _signed_ingest_payload(chain="eth")
+    payload["chain"] = "base"
+    r = client.post("/audit/ingest", json=payload)
+    assert r.status_code == 401
 
 
 # ── Concurrent-ingest race (Wave 3) ────────────────────────────────────────────
@@ -390,8 +457,6 @@ def test_approve_forged_signature_rejected(client, db, tmp_path):
 
 def test_approve_authorized_when_signer_allowlisted(client, db, tmp_path, monkeypatch):
     """With the allowlist configured, an approval from a listed signer succeeds."""
-    from app.config import get_settings
-
     monkeypatch.setattr(get_settings(), "operator_allowlist", _APPROVER)
     _add_approvable_job(db, tmp_path)
     order = [("Eyes", "Laser"), ("Background", "Red"), ("Background", "Blue")]
@@ -402,8 +467,6 @@ def test_approve_authorized_when_signer_allowlisted(client, db, tmp_path, monkey
 def test_approve_rejected_when_signer_not_allowlisted(client, db, tmp_path, monkeypatch):
     """A validly-signed approval from a non-operator is authenticated but not
     authorized → 403 (authN vs authZ)."""
-    from app.config import get_settings
-
     monkeypatch.setattr(get_settings(), "operator_allowlist", _OTHER_ADDRESS)
     _add_approvable_job(db, tmp_path)
     order = [(t["trait_category"], t["trait_value"]) for t in _TRAITS]

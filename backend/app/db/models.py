@@ -13,6 +13,11 @@ class Token(Base):
     token_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     owner_address: Mapped[str | None] = mapped_column(Text)
     snapshot_block: Mapped[int | None] = mapped_column(BigInteger)
+    # When the CURRENT owner received this token (Transfer-event block timestamp).
+    # NULL = unknown (pre-existing ingest data) — triggers the lazy per-wallet
+    # backfill in claims/acquisitions.py. Must be cleared (not carried over) on
+    # any ownership change whose transfer lacks a timestamp.
+    acquired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Trait(Base):
@@ -45,7 +50,9 @@ class Sale(Base):
 class Claim(Base):
     __tablename__ = "claims"
     __table_args__ = (
-        # No unique constraint on (wallet, tier) — whales may win multiple slots.
+        # No unique constraint on (wallet, tier) — whales may win multiple slots,
+        # but each win needs a DISJOINT set: `qualifying_tokens` on won rows are
+        # consumed per tier (eligibility.consumed_token_ids, 2026-08-05).
         # Slot uniqueness prevents double-awarding the same numbered slot.
         Index(
             "uix_claims_contract_tier_slot",
@@ -54,11 +61,12 @@ class Claim(Base):
             postgresql_where="slot_number IS NOT NULL",
         ),
         Index("ix_claims_contract_tier_wallet", "contract_address", "tier", "wallet_address"),
-        # At most one active (not-yet-won) window per (contract, tier, wallet) —
-        # prevents duplicate windows from concurrent /claim/submit calls. A wallet
-        # may still start a fresh window for another slot AFTER winning one (its
-        # won row has on_chain_tx_hash set, so it's excluded here), preserving the
-        # no-whale-cap rule.
+        # At most one active (not-yet-won) claim row per (contract, tier, wallet) —
+        # rows are created at /claim/sign time (windows are derived, no submit
+        # step); this makes a concurrent first-sign race a clean IntegrityError.
+        # A wallet may still record a fresh row for another slot AFTER winning
+        # one (its won row has on_chain_tx_hash set, so it's excluded here),
+        # preserving the no-whale-cap rule.
         Index(
             "uix_claims_one_active_window",
             "contract_address", "tier", "wallet_address",

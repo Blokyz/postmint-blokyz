@@ -86,3 +86,28 @@ def recover_publish_signer(
     message = build_publish_message(contract_address, slug, display_name)
     recovered = Account.recover_message(encode_defunct(text=message), signature=signature)
     return recovered.lower()
+
+
+def build_ingest_message(contract_address: str, chain: str, issued_at: int) -> str:
+    """Deterministic message an operator signs to start an ingestion.
+
+    Binds the contract + source chain so a signature can't authorize a different
+    collection, and ``issued_at`` (unix seconds) so a captured signature goes
+    stale — the API rejects messages older than ``ingest_sig_ttl_seconds``.
+    Plain lines; keep the client mirror (lib/ingest.ts) in lockstep.
+    """
+    return (
+        "PostMint collection ingest\n"
+        f"contract:{contract_address.lower()}\n"
+        f"chain:{chain}\n"
+        f"issued_at:{issued_at}"
+    )
+
+
+def recover_ingest_signer(
+    contract_address: str, chain: str, issued_at: int, signature: str
+) -> str:
+    """Recover the lowercased signer of an ingest message (see build_ingest_message)."""
+    message = build_ingest_message(contract_address, chain, issued_at)
+    recovered = Account.recover_message(encode_defunct(text=message), signature=signature)
+    return recovered.lower()

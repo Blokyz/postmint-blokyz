@@ -11,18 +11,19 @@ from sqlalchemy.orm import Session
 from app.atlas.bands import TIER_ORDER, slice_into_tiers
 from app.atlas.rules import DEFAULT_COUNT_BY_TIER, build_tier, detect_ladders
 
-# Default tier structure (cap, holding_window_hours, count_required) per
-# PROJECT_MASTER.md §2. Project-configurable per season — these are starting
-# defaults. `count_required` (the set size) escalates with rarity via
-# DEFAULT_COUNT_BY_TIER so rarer tiers demand a bigger assembled set. Mythic is
-# the merged apex grail tier (top 7%); its cap absorbs the former Ultra Rare ->
-# Secret slot budget.
+# Default tier structure (cap, holding_window_hours, count_required) —
+# project-configurable per season, these are starting defaults. `count_required`
+# (the set size) escalates with rarity via DEFAULT_COUNT_BY_TIER so rarer tiers
+# demand a bigger assembled set. Mythic is the merged apex grail tier (top 7%).
+# Windows are FLAT since 2026-08-04: holding is derived from on-chain acquisition
+# history (not an opt-in clock), so every non-Common tier holds 24h and Common is
+# instant — per-tier window tuning is retired as a lever (cap is the lever).
 DEFAULT_TIER_STRUCTURE: dict[str, dict] = {
     "Common": {"cap": 1000, "holding_window_hours": 0, "count_required": DEFAULT_COUNT_BY_TIER["Common"]},
     "Uncommon": {"cap": 750, "holding_window_hours": 24, "count_required": DEFAULT_COUNT_BY_TIER["Uncommon"]},
-    "Rare": {"cap": 500, "holding_window_hours": 72, "count_required": DEFAULT_COUNT_BY_TIER["Rare"]},
-    "Super Rare": {"cap": 250, "holding_window_hours": 168, "count_required": DEFAULT_COUNT_BY_TIER["Super Rare"]},
-    "Mythic": {"cap": 50, "holding_window_hours": 336, "count_required": DEFAULT_COUNT_BY_TIER["Mythic"]},
+    "Rare": {"cap": 500, "holding_window_hours": 24, "count_required": DEFAULT_COUNT_BY_TIER["Rare"]},
+    "Super Rare": {"cap": 250, "holding_window_hours": 24, "count_required": DEFAULT_COUNT_BY_TIER["Super Rare"]},
+    "Mythic": {"cap": 50, "holding_window_hours": 24, "count_required": DEFAULT_COUNT_BY_TIER["Mythic"]},
 }
 
 # Output order: easiest -> hardest (Common -> Secret).

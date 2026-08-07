@@ -122,6 +122,55 @@ def test_directory_summary_rollup(client, db):
             path.unlink()
 
 
+def test_directory_summary_with_recorded_wins(client, db):
+    """Regression: the rollup crashed ('int' object is not subscriptable) for
+    any collection with a WON claim after tier_fill_counts changed shape in
+    the derived-window rework — no prior test had a win in the directory."""
+    from app.db.models import Claim, Token, Trait
+
+    path = OUTPUT_DIR / f"{CONTRACT}_atlas_manifest.json"
+    write_atlas_manifest(
+        CONTRACT,
+        {
+            "tier_structure": {"Rare": {"cap": 500, "holding_window_hours": 24}},
+            "tiers": [
+                {
+                    "tier": "Rare",
+                    "set_rule": {
+                        "archetype": "count_of_pool",
+                        "pool": [{"trait_category": "Hat", "trait_value": "Gold"}],
+                        "count_required": 1,
+                    },
+                }
+            ],
+        },
+    )
+    try:
+        wallet = "0x00000000000000000000000000000000000000a1"
+        db.add(Token(contract_address=CONTRACT, token_id=1, owner_address=wallet))
+        db.add(Trait(contract_address=CONTRACT, token_id=1, trait_category="Hat", trait_value="Gold"))
+        db.add(
+            Claim(
+                contract_address=CONTRACT,
+                tier="Rare",
+                wallet_address=wallet,
+                on_chain_tx_hash="0x" + "ab" * 32,
+                slot_number=1,
+            )
+        )
+        db.commit()
+        _publish(client, slug="gvc")
+
+        r = client.get("/collections")
+        assert r.status_code == 200, r.text
+        s = r.json()[0]
+        assert s["total_filled"] == 1
+        assert s["racers"] == 1  # the wallet still holds the qualifying set
+    finally:
+        if path.exists():
+            path.unlink()
+
+
 def test_directory_hides_unpublished_by_default(client, db):
     _publish(client, slug="gvc", published=False)
     assert client.get("/collections").json() == []

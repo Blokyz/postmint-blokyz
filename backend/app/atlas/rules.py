@@ -67,12 +67,21 @@ def feasibility(pool_qty: int, estimated_qualifiers: int, cap: int, x: int) -> d
     race_intensity = estimated_qualifiers / cap if cap > 0 else None
     fit_score = race_intensity  # healthy band applied by callers via _FIT_RANGE
 
+    # The cap that would put this tier at the target fit (qualifiers / 3.0) —
+    # surfaced so the tuning UI can answer "what cap makes this healthy"
+    # instead of just flagging low_feasibility. None when there are no
+    # qualifiers (no cap can make an empty race healthy).
+    suggested_cap = (
+        max(1, round(estimated_qualifiers / _FIT_TARGET)) if estimated_qualifiers > 0 else None
+    )
+
     return {
         "pool_qualifying_nfts": pool_qty,
         "estimated_qualifiers": estimated_qualifiers,
         "max_sets_formable": max_sets_formable,
         "race_intensity": round(race_intensity, 6) if race_intensity is not None else None,
         "fit_score": round(fit_score, 6) if fit_score is not None else None,
+        "suggested_cap": suggested_cap,
     }
 
 

@@ -6,8 +6,9 @@ These helpers add a real gate.
 
 ENFORCE-WHEN-CONFIGURED: with an empty allowlist/token (the dev/test default)
 they are no-ops, so existing flows are unchanged. Set them before mainnet.
-  - ``operator_allowlist`` authorizes wallet-signed actions (approve, publish)
-    against the recovered EIP-191 signer — you must be who you say AND allowed.
+  - ``operator_allowlist`` authorizes wallet-signed actions (ingest, approve,
+    publish) against the recovered EIP-191 signer — you must be who you say AND
+    allowed.
   - ``operator_api_token`` gates the server-to-server season registration, which
     is driven by the deploy script and has no wallet to sign with.
 """

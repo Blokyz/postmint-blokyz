@@ -17,6 +17,12 @@ def _lower_address(v: str) -> str:
 class IngestRequest(BaseModel):
     contract_address: str
     chain: str = "eth"
+    # Operator authorization (enforced only when `operator_allowlist` is set).
+    # EIP-191 personal_sign over app.signing.build_ingest_message — which binds
+    # contract + chain + issued_at (unix seconds, rejected once stale).
+    operator_address: str | None = None
+    signature: str | None = None
+    issued_at: int | None = None
 
     @field_validator("contract_address")
     @classmethod
@@ -126,7 +132,10 @@ class LockAttestationResponse(BaseModel):
 
 class TierOverride(BaseModel):
     cap: int = Field(ge=1)
-    holding_window_hours: float = Field(ge=0)
+    # No longer an operator lever (flat 24h / Common 0 since 2026-08-04) —
+    # optional so an omitted value takes the flat default; enforcement clamps
+    # to the flat window regardless (windows.tier_window_seconds).
+    holding_window_hours: float | None = Field(default=None, ge=0)
     # Set size (tokens a wallet must hold from the tier's band). Optional so a
     # partial override keeps the graduated default; clamped to the pool downstream.
     count_required: int | None = Field(default=None, ge=1, le=20)
@@ -180,8 +189,10 @@ class SeasonResponse(BaseModel):
     chain_id: int
 
 
-class ClaimSubmitRequest(BaseModel):
-    """Opt in to (start/resume) a holding window for a qualifying wallet+tier."""
+class ClaimSyncRequest(BaseModel):
+    """Holder-facing claim recovery: ask the backend to check the chain for
+    this wallet's win when the frontend can't track the tx hash (smart-account
+    wallets wrap the tx, so the receipt-watcher waits on a phantom hash)."""
 
     contract_address: str
     tier: str
@@ -195,7 +206,8 @@ class ClaimSubmitRequest(BaseModel):
 
 class ClaimSignRequest(BaseModel):
     """Request a backend attestation to submit `SetClaimManager.claim` on-chain.
-    Only issued when the wallet's window is `ready` (elapsed + still qualifying)."""
+    Only issued when the wallet's derived window is `ready` (set completed >=
+    the holding window ago; instant for zero-window tiers)."""
 
     contract_address: str
     tier: str

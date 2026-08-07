@@ -218,6 +218,50 @@ class TransfersPage:
     total: int = 0
 
 
+def _parse_transfer_item(item: dict) -> dict | None:
+    """Normalize one Moralis NFT-transfer result row into the poller's dict shape.
+
+    ``acquired_at`` is the transfer's block timestamp — the moment the receiving
+    wallet took ownership (holding windows are derived from it). None when the
+    token id is unparseable (row skipped) or the timestamp is absent/malformed.
+    """
+    raw_id = item.get("token_id")
+    try:
+        token_id = int(raw_id)
+    except (ValueError, TypeError):
+        return None
+
+    block_number = item.get("block_number")
+    try:
+        block_number = int(block_number) if block_number is not None else None
+    except (ValueError, TypeError):
+        block_number = None
+
+    log_index = item.get("log_index")
+    try:
+        log_index = int(log_index) if log_index is not None else 0
+    except (ValueError, TypeError):
+        log_index = 0
+
+    acquired_at: datetime | None = None
+    raw_ts = item.get("block_timestamp")
+    if raw_ts:
+        try:
+            acquired_at = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            pass
+
+    return {
+        "token_id": token_id,
+        "from_address": (item.get("from_address") or "").lower() or None,
+        "to_address": (item.get("to_address") or "").lower() or None,
+        "block_number": block_number,
+        "log_index": log_index,
+        "tx_hash": (item.get("transaction_hash") or "").lower() or None,
+        "acquired_at": acquired_at,
+    }
+
+
 def fetch_transfers_page(
     contract: str,
     chain: str,
@@ -246,45 +290,50 @@ def fetch_transfers_page(
         api_key=api_key,
         timeout=httpx.Timeout(connect=15.0, read=60.0, write=10.0, pool=5.0),
     )
+    return _transfers_page(resp)
 
+
+def _transfers_page(resp: httpx.Response) -> TransfersPage:
     data = resp.json()
-    transfers: list[dict] = []
-
-    for item in data.get("result") or []:
-        raw_id = item.get("token_id")
-        try:
-            token_id = int(raw_id)
-        except (ValueError, TypeError):
-            continue
-
-        block_number = item.get("block_number")
-        try:
-            block_number = int(block_number) if block_number is not None else None
-        except (ValueError, TypeError):
-            block_number = None
-
-        log_index = item.get("log_index")
-        try:
-            log_index = int(log_index) if log_index is not None else 0
-        except (ValueError, TypeError):
-            log_index = 0
-
-        transfers.append({
-            "token_id": token_id,
-            "from_address": (item.get("from_address") or "").lower() or None,
-            "to_address": (item.get("to_address") or "").lower() or None,
-            "block_number": block_number,
-            "log_index": log_index,
-            "tx_hash": (item.get("transaction_hash") or "").lower() or None,
-        })
-
+    transfers = [t for t in map(_parse_transfer_item, data.get("result") or []) if t is not None]
     time.sleep(get_settings().moralis_rate_sleep)
-
     return TransfersPage(
         transfers=transfers,
         next_cursor=data.get("cursor") or None,
         total=int(data.get("total") or 0),
     )
+
+
+def fetch_wallet_transfers_page(
+    wallet: str,
+    contract: str,
+    chain: str,
+    api_key: str,
+    cursor: str | None = None,
+) -> TransfersPage:
+    """Fetch a page of one wallet's NFT transfers for a single contract, newest
+    first. Used by the lazy acquired_at backfill (claims/acquisitions.py): walk
+    back until each held token's latest inbound transfer is found. Same transfer
+    dict shape as fetch_transfers_page."""
+    params: dict[str, object] = {
+        "chain": _normalize_chain(chain),
+        "format": "decimal",
+        "order": "DESC",
+        "limit": PAGE_SIZE,
+        # Moralis array params use indexed-bracket form (cf. token_addresses[0]
+        # in the documented curl examples).
+        "contract_addresses[0]": contract,
+    }
+    if cursor:
+        params["cursor"] = cursor
+
+    resp = _get_with_retry(
+        f"{MORALIS_BASE}/{wallet}/nft/transfers",
+        params=params,
+        api_key=api_key,
+        timeout=httpx.Timeout(connect=15.0, read=60.0, write=10.0, pool=5.0),
+    )
+    return _transfers_page(resp)
 
 
 @dataclass

@@ -1,22 +1,22 @@
-"""Holding-window state machine (PROJECT_MASTER §11), backed by the `claims` table.
+"""Holding-window derivation from on-chain acquisition history.
 
-Model (decisions taken 2026-07-13):
-- **Explicit opt-in**: a window starts only when the holder calls `/claim/submit`
-  (via `submit_window`) and is found to qualify — the engine does not auto-track
-  windows for every qualifying wallet.
-- **Reset when count drops below X**: an active window resets only if the wallet's
-  qualifying-token count falls below the tier's `count_required` (a holder who
-  swaps one qualifying token for another, still holding >= X, keeps their window).
+Model (decided 2026-08-04, replacing the 2026-07-13 explicit-opt-in clock):
+- **No opt-in.** A tier's window starts the moment the wallet acquired its X-th
+  qualifying token (`acquisitions.set_completed_at` — the X-th-oldest
+  `tokens.acquired_at` among the held qualifying set). A long holder is `ready`
+  the first time they load the page; a fresh buyer gets an auto-started
+  countdown from their real purchase time.
+- **No persisted window state.** Status is pure arithmetic over token
+  acquisition timestamps — there is nothing to reset; selling below X and
+  rebuying restamps `acquired_at` naturally. A `claims` row is only created at
+  `/claim/sign` time (so `/claim/confirm` has a row to mark won).
+- Window seconds still come from the atlas `tier_structure[tier]
+  .holding_window_hours` (kept in lockstep with the deployed season's frozen
+  windows): 0 for Common (instant — acquisition data never consulted), a flat
+  24 for every other tier by default.
 
-A `claims` row is the window record. State is derived from its columns:
-- `window_started` NULL                        -> not_started (opted in, cleared/reset)
-- `window_started` set, `on_chain_tx_hash` NULL, still qualifies, elapsed < window   -> racing
-- ... elapsed >= window                          -> ready (eligible for a claim sig)
-- ... no longer qualifies                        -> reset (poller will clear window_started)
-- `on_chain_tx_hash` set                         -> won
-
-Windows are frozen per season; the required duration is read from the atlas
-manifest's `tier_structure[tier].holding_window_hours`.
+States: `won` | `ready` | `racing` | `not_started` (not qualified). The old
+`reset` state is gone with the persisted windows.
 """
 
 from __future__ import annotations
@@ -24,16 +24,14 @@ from __future__ import annotations
 import math
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.claims.eligibility import TierEligibility, evaluate_tier, find_tier_entry
-from app.db.models import Claim
+from app.claims.acquisitions import ensure_acquired_at, set_completed_at
+from app.claims.eligibility import evaluate_tier, find_tier_entry
 
 STATUS_WON = "won"
 STATUS_READY = "ready"
 STATUS_RACING = "racing"
-STATUS_RESET = "reset"
 STATUS_NOT_STARTED = "not_started"
 
 
@@ -41,23 +39,20 @@ class UnknownTier(Exception):
     """The requested tier is not present in the atlas manifest."""
 
 
-class NotQualified(Exception):
-    """The wallet does not currently hold the qualifying set for the tier."""
-
-    def __init__(self, eligibility: TierEligibility):
-        self.eligibility = eligibility
-        super().__init__(
-            f"wallet holds {eligibility.held_count}/{eligibility.count_required} "
-            f"for tier {eligibility.tier!r} (needs {eligibility.needed} more)"
-        )
+# The one flat holding window (2026-08-04): every non-instant tier holds 24h.
+# Code-authoritative so a stale pre-change manifest (72-336h values) can never
+# enforce an old duration — the manifest only distinguishes instant (0, Common)
+# from standard. Seasons must deploy with the same flat windows.
+FLAT_WINDOW_SECONDS = 24 * 3600
 
 
 def tier_window_seconds(atlas_manifest: dict, tier: str) -> int:
-    """Required holding-window duration in seconds for `tier`."""
+    """Required holding-window duration in seconds for `tier`: 0 for instant
+    tiers (manifest hours == 0), the flat 24h for everything else."""
     hours = (atlas_manifest.get("tier_structure", {}).get(tier, {}) or {}).get(
         "holding_window_hours", 0
     )
-    return int(hours) * 3600
+    return 0 if not hours else FLAT_WINDOW_SECONDS
 
 
 def _utcnow() -> datetime:
@@ -71,29 +66,27 @@ def _aware(dt: datetime) -> datetime:
 
 def derive_status(
     now: datetime,
-    window_started: datetime | None,
+    set_completed: datetime | None,
     window_seconds: int,
     qualifies: bool,
     won: bool,
 ) -> dict:
-    """Pure window-state derivation. All the time math lives here so it can be
-    unit-tested without a DB."""
+    """Pure window-state derivation off the set-completion moment. All the time
+    math lives here so it can be unit-tested without a DB.
+
+    `set_completed` is when the wallet acquired its X-th qualifying token; None
+    with `qualifies=True` is treated as "completed just now" (unknown history is
+    conservative — it can lengthen a wait, never shorten one).
+    """
     if won:
         return {"status": STATUS_WON, "seconds_remaining": 0}
-    if window_started is None:
+    if not qualifies:
         return {"status": STATUS_NOT_STARTED, "seconds_remaining": None}
 
-    window_started = _aware(window_started)
-    ready_at = window_started + timedelta(seconds=window_seconds)
+    set_completed = _aware(set_completed) if set_completed is not None else now
+    ready_at = set_completed + timedelta(seconds=window_seconds)
 
-    if not qualifies:
-        return {
-            "status": STATUS_RESET,
-            "ready_at": ready_at.isoformat(),
-            "seconds_remaining": None,
-        }
-
-    elapsed = (now - window_started).total_seconds()
+    elapsed = (now - set_completed).total_seconds()
     if elapsed >= window_seconds:
         return {"status": STATUS_READY, "ready_at": ready_at.isoformat(), "seconds_remaining": 0}
     return {
@@ -103,23 +96,42 @@ def derive_status(
     }
 
 
-def _active_row(db: Session, contract: str, tier: str, wallet: str) -> Claim | None:
-    """The single un-won window row for (contract, tier, wallet), if any."""
-    return db.scalar(
-        select(Claim)
-        .where(Claim.contract_address == contract.lower())
-        .where(Claim.tier == tier)
-        .where(Claim.wallet_address == wallet.lower())
-        .where(Claim.on_chain_tx_hash.is_(None))
-    )
-
-
-def _status_payload(
-    tier: str, elig: TierEligibility, row: Claim | None, window_seconds: int, now: datetime
+def window_status(
+    db: Session,
+    contract: str,
+    tier: str,
+    wallet: str,
+    atlas_manifest: dict,
+    chain: str = "eth",
+    now: datetime | None = None,
 ) -> dict:
-    won = row is not None and row.on_chain_tx_hash is not None
-    started = row.window_started if row is not None else None
-    state = derive_status(now, started, window_seconds, elig.qualifies, won)
+    """Current derived window status for (contract, tier, wallet).
+
+    For a qualifying wallet on a tier with a non-zero window this lazily
+    backfills missing `acquired_at` (one Moralis walk per wallet, ever — see
+    acquisitions.ensure_acquired_at), so the caller should COMMIT afterwards to
+    persist the stamps. Zero-window tiers (Common) never consult acquisition
+    data.
+    """
+    now = now or _utcnow()
+    contract, wallet = contract.lower(), wallet.lower()
+    entry = find_tier_entry(atlas_manifest, tier)
+    if entry is None:
+        raise UnknownTier(tier)
+
+    elig = evaluate_tier(db, contract, wallet, entry)
+    window_seconds = tier_window_seconds(atlas_manifest, tier)
+
+    completed: datetime | None = None
+    if elig.qualifies and window_seconds > 0:
+        # Backfill ALL of the wallet's unstamped tokens in one walk (pools are
+        # disjoint across tiers — restricting per-tier would repeat the walk).
+        ensure_acquired_at(db, contract, wallet, chain)
+        completed = set_completed_at(
+            db, contract, wallet, elig.qualifying_token_ids, elig.count_required
+        )
+
+    state = derive_status(now, completed, window_seconds, elig.qualifies, won=False)
     return {
         "tier": tier,
         "window_seconds": window_seconds,
@@ -128,101 +140,8 @@ def _status_payload(
         "count_required": elig.count_required,
         "progress_pct": elig.progress_pct,
         "qualifying_token_ids": elig.qualifying_token_ids,
-        "window_started": _aware(started).isoformat() if started is not None else None,
+        # The set-completion moment (window start). None for zero-window tiers
+        # and non-qualifying wallets. Key name kept from the opt-in era.
+        "window_started": _aware(completed).isoformat() if completed is not None else None,
         **state,
     }
-
-
-def submit_window(
-    db: Session,
-    contract: str,
-    tier: str,
-    wallet: str,
-    atlas_manifest: dict,
-    now: datetime | None = None,
-) -> dict:
-    """Start (or resume) a holding window for a qualifying wallet. Idempotent: an
-    already-running window is returned unchanged (the clock is NOT restarted).
-
-    Raises `UnknownTier` if the tier isn't in the manifest, `NotQualified` if the
-    wallet doesn't currently hold the set. Flushes; the caller commits.
-    """
-    now = now or _utcnow()
-    contract, wallet = contract.lower(), wallet.lower()
-    entry = find_tier_entry(atlas_manifest, tier)
-    if entry is None:
-        raise UnknownTier(tier)
-
-    elig = evaluate_tier(db, contract, wallet, entry)
-    if not elig.qualifies:
-        raise NotQualified(elig)
-
-    row = _active_row(db, contract, tier, wallet)
-    if row is None:
-        row = Claim(contract_address=contract, tier=tier, wallet_address=wallet)
-        db.add(row)
-
-    # Start the clock only for a fresh/reset window — don't restart a running one.
-    if row.window_started is None:
-        row.window_started = now
-        row.qualifying_tokens = elig.qualifying_token_ids
-        row.window_completed = None
-
-    db.flush()
-    return _status_payload(tier, elig, row, tier_window_seconds(atlas_manifest, tier), now)
-
-
-def window_status(
-    db: Session,
-    contract: str,
-    tier: str,
-    wallet: str,
-    atlas_manifest: dict,
-    now: datetime | None = None,
-) -> dict:
-    """Current window status for (contract, tier, wallet) — no mutation."""
-    now = now or _utcnow()
-    entry = find_tier_entry(atlas_manifest, tier)
-    if entry is None:
-        raise UnknownTier(tier)
-    elig = evaluate_tier(db, contract, wallet, entry)
-    row = _active_row(db, contract, tier, wallet)
-    return _status_payload(tier, elig, row, tier_window_seconds(atlas_manifest, tier), now)
-
-
-def reset_window(row: Claim) -> None:
-    """Clear a window (transfer-out dropped the wallet below X). Keeps the row (the
-    wallet's opt-in) so a re-submit reuses it."""
-    row.window_started = None
-    row.qualifying_tokens = None
-    row.window_completed = None
-
-
-def reset_if_unqualified(
-    db: Session, contract: str, wallet: str, atlas_manifest: dict
-) -> list[str]:
-    """Re-evaluate every active window for `wallet` and reset any that no longer
-    qualify. Returns the list of tiers that were reset. Used by the transfer poller
-    after ownership updates. Flushes; caller commits.
-    """
-    contract, wallet = contract.lower(), wallet.lower()
-    rows = db.scalars(
-        select(Claim)
-        .where(Claim.contract_address == contract)
-        .where(Claim.wallet_address == wallet)
-        .where(Claim.on_chain_tx_hash.is_(None))
-        .where(Claim.window_started.is_not(None))
-    ).all()
-
-    reset_tiers: list[str] = []
-    for row in rows:
-        entry = find_tier_entry(atlas_manifest, row.tier)
-        if entry is None:
-            continue
-        elig = evaluate_tier(db, contract, wallet, entry)
-        if not elig.qualifies:
-            reset_window(row)
-            reset_tiers.append(row.tier)
-    if reset_tiers:
-        db.flush()
-    return reset_tiers

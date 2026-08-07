@@ -4,6 +4,9 @@ import os
 os.environ["DATABASE_URL"] = "postgresql://postmint:postmint@localhost:15432/postmint_test"
 os.environ["REDIS_URL"] = "redis://localhost:6379/1"
 os.environ["MORALIS_API_KEY"] = "test-key-fake"
+# Disable the standings/directory rollup cache so directly-seeded rows are
+# always visible; cache behavior itself is covered by test_ttl_cache.py.
+os.environ["STANDINGS_CACHE_TTL_SECONDS"] = "0"
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -43,6 +46,9 @@ def test_engine():
 @pytest.fixture
 def clean_tables(test_engine):
     """Truncate all tables. Used as a dependency by db/client so each test starts clean."""
+    from app.ttl_cache import race_cache
+
+    race_cache.clear()
     with test_engine.connect() as conn:
         conn.execute(text(f"TRUNCATE {_TABLES_TO_TRUNCATE} RESTART IDENTITY CASCADE"))
         conn.commit()
@@ -55,6 +61,19 @@ def db(test_engine, clean_tables) -> Session:
     session = TestSession()
     yield session
     session.close()
+
+
+@pytest.fixture
+def mock_chain(monkeypatch):
+    """Stub on-chain verification so `/claim/confirm` accepts a test tx and
+    reports slot 1 (the real path fetches an eth_getTransactionReceipt)."""
+    from app.api import claims as claims_mod
+
+    def _stub(*_a, **_k):
+        return {"slot_number": 1, "nonce": 1, "window_started_at": 0}
+
+    monkeypatch.setattr(claims_mod, "verify_claim_tx", _stub)
+    return _stub
 
 
 @pytest.fixture

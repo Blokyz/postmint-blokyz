@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { HolderNav } from "@/components/HolderNav";
+import { SiteHeader } from "@/components/SiteHeader";
 import { CollectionProvider } from "@/lib/collection";
 import { Collection, getCollection } from "@/lib/collections";
 
@@ -17,31 +18,45 @@ export default function CollectionLayout({ children }: { children: React.ReactNo
   const [missing, setMissing] = useState(false);
 
   useEffect(() => {
-    let live = true;
-    getCollection(slug)
-      .then((c) => live && setCollection(c))
-      .catch(() => live && setMissing(true));
+    const controller = new AbortController();
+    setCollection(null);
+    setMissing(false);
+
+    getCollection(slug, { signal: controller.signal })
+      .then((c) => setCollection(c))
+      .catch((err) => {
+        if (err.name !== "AbortError") {
+          setMissing(true);
+        }
+      });
+
     return () => {
-      live = false;
+      controller.abort();
     };
   }, [slug]);
 
   if (missing) {
     return (
-      <div className="collection-shell">
-        <p className="collection-missing">
-          No contest found at <code>/c/{slug}</code>.{" "}
-          <Link href="/">← Back to contests</Link>
-        </p>
-      </div>
+      <>
+        <SiteHeader />
+        <div className="collection-shell">
+          <p className="collection-missing">
+            No contest found at <code>/c/{slug}</code>.{" "}
+            <Link href="/paddock">← Back to contests</Link>
+          </p>
+        </div>
+      </>
     );
   }
 
   if (!collection) {
     return (
-      <div className="collection-shell">
-        <p className="collection-loading">Loading contest…</p>
-      </div>
+      <>
+        <SiteHeader />
+        <div className="collection-shell">
+          <p className="collection-loading">Loading contest…</p>
+        </div>
+      </>
     );
   }
 

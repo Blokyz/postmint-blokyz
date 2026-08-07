@@ -27,7 +27,7 @@ function slugify(name: string): string {
 }
 
 const RESERVED = new Set([
-  "c", "studio", "api", "admin", "app", "race", "standings", "driver",
+  "c", "studio", "paddock", "api", "admin", "app", "race", "standings", "driver",
   "collections", "collection", "health", "audit", "atlas", "claim", "claims",
   "winners", "eligibility", "leaderboard", "season", "seasons", "_next",
   "static", "favicon.ico", "robots.txt", "sitemap.xml",
@@ -131,6 +131,22 @@ export default function PublishPage() {
     setError(null);
     try {
       const name = displayName.trim();
+
+      // Instant slug re-verification before asking for wallet signature.
+      if (!existing) {
+        try {
+          await apiGet<Collection>(`/collections/${slug}`);
+          setAvail("taken");
+          setError("That slug was taken while you were editing — please choose another.");
+          setSubmitting(false);
+          return;
+        } catch (checkErr) {
+          if (!(checkErr instanceof ApiError && checkErr.status === 404)) {
+            throw checkErr;
+          }
+        }
+      }
+
       // The backend uses `req.slug or ""`, so sign "" on re-publish (slug omitted).
       const signedSlug = existing ? "" : slug;
 
@@ -279,7 +295,7 @@ export default function PublishPage() {
             <Link href={`/c/${done.slug}`} className="studio-stage-btn">
               View holder page ▸
             </Link>
-            <Link href="/" className="studio-stage-btn is-ghost">
+            <Link href="/paddock" className="studio-stage-btn is-ghost">
               The Paddock
             </Link>
           </div>

@@ -7,7 +7,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
+import { OperatorNav } from "@/components/OperatorNav";
 import { ADDRESS_RE, shortAddr } from "@/lib/api";
 import { CollectionSummary, listAllCollections } from "@/lib/collections";
 
@@ -38,13 +38,14 @@ export default function StudioHome() {
   }
 
   return (
-    <main className="studio">
+    <>
+      <OperatorNav />
+      <main className="studio">
       <header className="studio-top">
         <div>
           <span className="studio-kicker">PostMint // operator console</span>
           <h1 className="studio-h1">Studio</h1>
         </div>
-        <ConnectButton accountStatus="address" chainStatus="icon" showBalance={false} />
       </header>
 
       <section className="studio-enter">
@@ -98,9 +99,7 @@ export default function StudioHome() {
         )}
       </section>
 
-      <footer className="studio-foot">
-        <Link href="/">← The Paddock (holder view)</Link>
-      </footer>
-    </main>
+      </main>
+    </>
   );
 }

@@ -15,7 +15,7 @@ const RAMP = Object.entries(TIER_META)
 
 const STEPS = [
   { n: "01", label: "Hold the set", body: "Own the qualifying traits for a tier — the rarer the tier, the tougher the set." },
-  { n: "02", label: "Start the clock", body: "Opt in and hold the set continuously through the tier's holding window." },
+  { n: "02", label: "Beat the clock", body: "Your window runs from the moment you completed the set on-chain — long holders are ready instantly." },
   { n: "03", label: "Claim your slot", body: "First N per tier to finish take a prize slot on-chain. No per-wallet cap." },
 ];
 

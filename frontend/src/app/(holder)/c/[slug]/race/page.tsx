@@ -10,10 +10,13 @@ import {
   useWaitForTransactionReceipt,
   useWriteContract,
 } from "wagmi";
-import { API_URL, shortAddr } from "@/lib/api";
+import { API_URL, apiPost, shortAddr } from "@/lib/api";
 import { useCollection } from "@/lib/collection";
 import { explorerTxUrl } from "@/lib/manifestRegistry";
 import { ClaimAttestation, SET_CLAIM_MANAGER_ABI, claimArgs } from "@/lib/setClaimManager";
+import { ShoppingPanel } from "@/components/ShoppingPanel";
+import { ClaimConfirmModal } from "@/components/ClaimConfirmModal";
+import { InfoTip } from "@/components/InfoTip";
 
 const display = displayFont;
 const mono = bodyFont;
@@ -53,8 +56,11 @@ type WindowStatus = {
   count_required: number;
   progress_pct: number;
   qualifying_token_ids: number[];
+  // The moment the wallet completed the set on-chain (its X-th qualifying
+  // acquisition) — the window runs from here automatically. Null for
+  // zero-window tiers and non-qualifying wallets.
   window_started: string | null;
-  status: "not_started" | "racing" | "ready" | "won" | "reset";
+  status: "not_started" | "racing" | "ready" | "won";
   ready_at?: string | null;
   seconds_remaining: number | null;
 };
@@ -74,17 +80,18 @@ type Leaderboard = {
   slots_filled: number;
   slots_remaining: number;
   winners: Winner[];
-  racers: { wallet_address: string; window_started: number; status: string; seconds_remaining: number | null }[];
+  // Wallets currently holding the qualifying set (every one is racing by
+  // definition — windows derive from acquisition history).
+  racers: { wallet_address: string; held_count: number; status: string }[];
+  total_racers: number;
 };
 
 type Lane = { elig: Eligibility; ws: WindowStatus; lb: Leaderboard };
 
 const STATE_LABEL: Record<string, string> = {
-  not_started: "STANDBY",
   racing: "ON TRACK",
   ready: "GO",
   won: "FINISHED",
-  reset: "RESET",
   full: "GRID FULL",
   locked: "NOT ELIGIBLE",
 };
@@ -113,7 +120,7 @@ function humanizeError(e: unknown): string {
 }
 
 export default function RacePage() {
-  const { contract_address, display_name } = useCollection();
+  const { contract_address, display_name, chain } = useCollection();
   const contract = contract_address;
   const { address, isConnected } = useAccount();
   const wallet = address?.toLowerCase();
@@ -127,8 +134,10 @@ export default function RacePage() {
   const [notice, setNotice] = useState<string | null>(null);
 
   // The single in-flight claim (users claim one lane at a time). We wait on its
-  // receipt with a hook, then POST /claim/confirm.
-  const [pending, setPending] = useState<{ tier: string; hash: `0x${string}`; chainId: number } | null>(null);
+  // receipt with a hook, then POST /claim/confirm. `startedAt` powers the
+  // chain-sync fallback below (smart-account wallets wrap the tx, so this hash
+  // can be a phantom that never mines even though the real claim succeeded).
+  const [pending, setPending] = useState<{ tier: string; hash: `0x${string}`; chainId: number; startedAt?: number } | null>(null);
   const [busyTier, setBusyTier] = useState<string | null>(null);
   const { isSuccess: mined } = useWaitForTransactionReceipt({ hash: pending?.hash, chainId: pending?.chainId });
   const confirmAttempt = useRef(0);
@@ -136,6 +145,11 @@ export default function RacePage() {
   // 1s ticker so racing countdowns move without refetching.
   const [, setTick] = useState(0);
   const loadedAt = useRef<number>(0);
+
+  // Ready notifications (the retention lever). Tiers already ready when the grid
+  // first evaluates are seeded silently — only a live racing→ready flip notifies.
+  const notifiedTiers = useRef<Set<string>>(new Set());
+  const notifySeeded = useRef(false);
 
   // Persist the in-flight claim so a reload / tab-close can resume confirmation:
   // the tx is already on-chain, only the DB record is missing. Keyed per contract.
@@ -192,6 +206,15 @@ export default function RacePage() {
         );
         loadedAt.current = Date.now();
         setLanes(details);
+        // Windows run automatically now (no opt-in click), so ask for
+        // notification permission as soon as a countdown is actually live.
+        if (
+          details.some((l) => l.ws.status === "racing") &&
+          typeof Notification !== "undefined" &&
+          Notification.permission === "default"
+        ) {
+          Notification.requestPermission().catch(() => {});
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load race");
         setLanes(null);
@@ -219,6 +242,88 @@ export default function RacePage() {
       if (refreshId) clearInterval(refreshId);
     };
   }, [wallet, lanes, load]);
+
+  // Fire a notification the moment a racing lane's countdown crosses zero. Runs
+  // every render (the 1s ticker drives it) but each tier notifies at most once.
+  useEffect(() => {
+    if (!lanes) return;
+    const elapsed = Math.floor((Date.now() - loadedAt.current) / 1000);
+    const readyTiers = lanes
+      .filter((l) => {
+        if (l.ws.status === "ready") return true;
+        if (l.ws.status === "racing" && l.ws.seconds_remaining != null)
+          return l.ws.seconds_remaining - elapsed <= 0;
+        return false;
+      })
+      .map((l) => l.elig.tier);
+
+    if (!notifySeeded.current) {
+      readyTiers.forEach((t) => notifiedTiers.current.add(t));
+      notifySeeded.current = true;
+      return;
+    }
+
+    // A tier actively counting down again (e.g. a fresh window after a win)
+    // re-arms its notification.
+    for (const l of lanes) {
+      if (l.ws.status === "racing" && l.ws.seconds_remaining != null && l.ws.seconds_remaining - elapsed > 0)
+        notifiedTiers.current.delete(l.elig.tier);
+    }
+
+    for (const tier of readyTiers) {
+      if (notifiedTiers.current.has(tier)) continue;
+      notifiedTiers.current.add(tier);
+      setNotice(`${tier} holding window complete — you can claim your slot.`);
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        try {
+          new Notification(`${display_name}: ${tier} is ready to claim`, {
+            body: "Your holding window is complete — claim your slot before the grid fills.",
+            tag: `pmb-ready-${contract}-${tier}`,
+          });
+        } catch {
+          /* constructor unsupported (e.g. Android Chrome without a SW) */
+        }
+      }
+    }
+  });
+
+  // Chain-sync fallback: if the receipt hasn't arrived after a grace period,
+  // the hash may be a phantom (smart-account wallets submit a different wrapped
+  // tx). Ask the backend to scan the season's Claimed logs directly — the win
+  // is recorded from the chain and the lane flips without user action.
+  useEffect(() => {
+    if (!pending || mined || !wallet) return;
+    const claim = pending;
+    const startedAt = claim.startedAt ?? 0; // restored pendings sync immediately
+    let cancelled = false;
+
+    const id = setInterval(async () => {
+      if (Date.now() - startedAt < 30_000) return; // give the receipt a fair chance
+      try {
+        const body = await apiPost<{ won: boolean; slot_number?: number }>("/claim/sync", {
+          contract_address: contract,
+          tier: claim.tier,
+          wallet_address: wallet,
+        });
+        if (cancelled) return;
+        if (body.won) {
+          setNotice(
+            `Slot ${body.slot_number ? `P${body.slot_number} ` : ""}secured in ${claim.tier} — recovered from the chain.`,
+          );
+          setPending(null);
+          setBusyTier(null);
+          load(wallet);
+        }
+      } catch {
+        /* transient — next tick retries */
+      }
+    }, 12_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [pending, mined, wallet, contract, load]);
 
   // When a claim tx is mined, record it with the backend (which verifies it
   // on-chain). We must NOT show success unless the backend actually confirms —
@@ -301,29 +406,6 @@ export default function RacePage() {
     };
   }, [mined, pending, contract, wallet, load]);
 
-  async function startWindow(tier: string) {
-    if (!wallet) return;
-    setBusyTier(tier);
-    setError(null);
-    try {
-      const res = await fetch(`${API_URL}/claim/submit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contract_address: contract, tier, wallet_address: wallet }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        const d = body?.detail;
-        throw new Error(typeof d === "string" ? d : d?.error === "not_qualified" ? "You no longer hold the set." : `Submit failed (${res.status})`);
-      }
-      await load(wallet);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to start window");
-    } finally {
-      setBusyTier(null);
-    }
-  }
-
   async function claimSlot(tier: string) {
     if (!wallet) return;
     setBusyTier(tier);
@@ -349,13 +431,16 @@ export default function RacePage() {
         args: claimArgs(att),
         chainId: att.chain_id,
       });
-      setPending({ tier, hash, chainId: att.chain_id });
-      // busyTier stays set until the receipt effect clears it.
+      setPending({ tier, hash, chainId: att.chain_id, startedAt: Date.now() });
+      // busyTier stays set until the receipt effect (or the chain-sync
+      // fallback) clears it.
     } catch (e) {
       setError(humanizeError(e));
       setBusyTier(null);
     }
   }
+
+  const [confirmTier, setConfirmTier] = useState<string | null>(null);
 
   const grid = useMemo(() => lanes ?? [], [lanes]);
 
@@ -383,12 +468,32 @@ export default function RacePage() {
       )}
       {error && <p className="rc-alert">⨯ {error}</p>}
       {notice && <p className="rc-notice">✓ {notice}</p>}
+      {pending && (
+        <div className="rc-notice" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>
+            Claim transaction pending ({pending.hash.slice(0, 10)}…) — smart-account wallets can take
+            a minute; the chain is checked automatically.
+          </span>
+          <button
+            style={{ background: "none", border: "none", color: "#ffd23f", cursor: "pointer", textDecoration: "underline", fontSize: "0.85rem" }}
+            onClick={() => {
+              setPending(null);
+              setBusyTier(null);
+              if (pendingKey) localStorage.removeItem(pendingKey);
+            }}
+          >
+            Clear stuck status
+          </button>
+        </div>
+      )}
 
       {grid.length > 0 && (
         <section className="rc-tower">
           {grid.map((lane, i) => (
             <Lane
               key={lane.elig.tier}
+              contract={contract}
+              chain={chain}
               lane={lane}
               index={i}
               nowMs={Date.now()}
@@ -398,8 +503,7 @@ export default function RacePage() {
               pendingChain={pending?.tier === lane.elig.tier ? pending.chainId : null}
               connected={isConnected}
               myWallet={wallet}
-              onStart={() => startWindow(lane.elig.tier)}
-              onClaim={() => claimSlot(lane.elig.tier)}
+              onClaim={() => setConfirmTier(lane.elig.tier)}
             />
           ))}
         </section>
@@ -410,11 +514,30 @@ export default function RacePage() {
           <p>No tiers found. This collection needs a generated atlas before the race can run.</p>
         </section>
       )}
+
+      {confirmTier !== null && (
+        <ClaimConfirmModal
+          tier={confirmTier}
+          collectionName={display_name}
+          chain={chain}
+          onConfirm={async () => {
+            try {
+              await claimSlot(confirmTier);
+            } finally {
+              setConfirmTier(null);
+            }
+          }}
+          onCancel={() => setConfirmTier(null)}
+          loading={busyTier === confirmTier}
+        />
+      )}
     </main>
   );
 }
 
 function Lane({
+  contract,
+  chain,
   lane,
   index,
   nowMs,
@@ -424,9 +547,10 @@ function Lane({
   pendingChain,
   connected,
   myWallet,
-  onStart,
   onClaim,
 }: {
+  contract: string;
+  chain?: string;
   lane: Lane;
   index: number;
   nowMs: number;
@@ -436,22 +560,32 @@ function Lane({
   pendingChain: number | null;
   connected: boolean;
   myWallet?: string;
-  onStart: () => void;
   onClaim: () => void;
 }) {
   const { elig, ws, lb } = lane;
   const accent = TIER_ACCENT[elig.tier] ?? "#8b93a0";
   const full = lb.slots_remaining <= 0;
 
+  // Slots this wallet already secured in the tier (from the winners board).
+  const myWins = myWallet
+    ? lb.winners.filter((w) => w.wallet_address?.toLowerCase() === myWallet.toLowerCase())
+    : [];
+  const winLabel = myWins.map((w) => (w.slot_number != null ? `P${w.slot_number}` : "—")).join(", ");
+
   // Live countdown: seconds_remaining captured at load, minus elapsed since.
   const elapsed = Math.floor((nowMs - loadedAt) / 1000);
   const liveRemaining = ws.seconds_remaining != null ? Math.max(0, ws.seconds_remaining - elapsed) : null;
 
   // Effective state (server status, overlaid with local countdown + grid-full).
+  // Qualification implies a running window — the clock started at the wallet's
+  // X-th qualifying acquisition, so lanes are only ever GO / ON TRACK / locked.
+  // A won slot consumes its set, so after a win eligibility drops until the
+  // wallet assembles a fresh set — lead with FINISHED, not NOT ELIGIBLE.
   let state: string = ws.status;
   if (state === "racing" && liveRemaining === 0) state = "ready";
-  if (!elig.qualifies && state !== "won") state = ws.status === "reset" ? "reset" : "locked";
+  if (!elig.qualifies && state !== "won") state = "locked";
   if (full && state !== "won") state = "full";
+  if (myWins.length > 0 && (state === "locked" || state === "full" || state === "not_started")) state = "won";
 
   const txUrl = pendingChain && pendingHash ? explorerTxUrl(pendingChain, pendingHash) : null;
 
@@ -468,13 +602,21 @@ function Lane({
             <span className="rc-arch">{elig.archetype.replace(/_/g, " ")}</span>
           </div>
           <span className={`rc-state is-${state}`}>{STATE_LABEL[state] ?? state.toUpperCase()}</span>
+          {myWins.length > 0 && state !== "won" && (
+            <span className="rc-state is-won">{winLabel} SECURED</span>
+          )}
         </div>
 
         <div className="rc-lane-grid">
           {/* Holdings meter */}
           <div className="rc-meter-block">
             <div className="rc-meter-top">
-              <span className="rc-meter-label">SET PROGRESS</span>
+              <span className="rc-meter-label">
+                SET PROGRESS
+                <InfoTip
+                  text={`Hold ${elig.count_required} NFT${elig.count_required === 1 ? "" : "s"} carrying any qualifying trait for this tier. Tokens are reusable across tiers — the same NFT can count toward several sets at once — but each token can only back ONE winning claim per tier: a claimed set is spent, and another slot needs a fresh set.`}
+                />
+              </span>
               <span className="rc-meter-count">
                 {elig.held_count}
                 <span className="rc-meter-req">/{elig.count_required}</span>
@@ -498,6 +640,20 @@ function Lane({
             {!elig.qualifies && state !== "won" && (
               <p className="rc-need">Need {elig.needed} more qualifying token{elig.needed === 1 ? "" : "s"}.</p>
             )}
+            {state === "won" && !elig.qualifies && !full && elig.needed > 0 && (
+              <p className="rc-need">
+                Winning set spent — {elig.needed} fresh token{elig.needed === 1 ? "" : "s"} unlocks another slot.
+              </p>
+            )}
+            {!elig.qualifies && elig.needed > 0 && myWallet && (state !== "won" || !full) && (
+              <ShoppingPanel
+                contract={contract}
+                wallet={myWallet}
+                tier={elig.tier}
+                needed={elig.needed}
+                chain={chain ?? "eth"}
+              />
+            )}
           </div>
 
           {/* Clock / action */}
@@ -514,12 +670,15 @@ function Lane({
               )}
               <span className="rc-clock-cap">
                 {state === "racing" ? "TIME REMAINING" : state === "ready" ? "READY TO CLAIM" : state === "won" ? "FINISHED" : "HOLD WINDOW"}
+                <InfoTip text="Your clock runs automatically from the moment you assembled the set on-chain — long holders are ready immediately. Keep the set together: selling below the required count restarts the clock from your rebuy. When it hits zero you can claim a slot." />
               </span>
             </div>
 
             <div className="rc-action">
               {state === "won" ? (
-                <span className="rc-won-badge">● Slot secured</span>
+                <span className="rc-won-badge">
+                  ● Slot{myWins.length > 1 ? "s" : ""} {winLabel} secured
+                </span>
               ) : state === "full" ? (
                 <button className="rc-btn" disabled>
                   GRID FULL
@@ -531,10 +690,6 @@ function Lane({
               ) : state === "racing" ? (
                 <button className="rc-btn" disabled>
                   ON TRACK
-                </button>
-              ) : elig.qualifies ? (
-                <button className="rc-btn rc-btn--start" onClick={onStart} disabled={!connected || busy}>
-                  {busy ? "STARTING…" : state === "reset" ? "RESTART CLOCK ▸" : "START CLOCK ▸"}
                 </button>
               ) : (
                 <button className="rc-btn" disabled>
@@ -555,7 +710,7 @@ function Lane({
           <div className="rc-standings-head">
             <span className="rc-standings-label">// grid</span>
             <span className="rc-slots">
-              <b>{lb.slots_filled}</b> / {lb.cap} slots · {lb.slots_remaining} open · {lb.racers.length} racing
+              <b>{lb.slots_filled}</b> / {lb.cap} slots · {lb.slots_remaining} open · {lb.total_racers ?? lb.racers.length} racing
             </span>
           </div>
           {lb.winners.length > 0 ? (

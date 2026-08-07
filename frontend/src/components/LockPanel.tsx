@@ -9,10 +9,9 @@ import {
   useWaitForTransactionReceipt,
   useWriteContract,
 } from "wagmi";
+import { ApiError, apiPost } from "@/lib/api";
 import { LockAttestation, MANIFEST_REGISTRY_ABI, explorerTxUrl } from "@/lib/manifestRegistry";
 import { manifestRegistryAddress } from "@/lib/wagmi";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // Turn a wagmi/viem error into one human line. The contract's revert strings
 // ("Already locked", "Unauthorized: bad backend signature") surface verbatim
@@ -71,16 +70,7 @@ export function LockPanel({ contract, dirty }: { contract: string; dirty: boolea
     setTxHash(undefined);
     setPhase("attesting");
     try {
-      const res = await fetch(`${API_URL}/atlas/lock-attestation`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contract_address: contract }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.detail ?? `Lock attestation failed (${res.status})`);
-      }
-      const attestation = (await res.json()) as LockAttestation;
+      const attestation = await apiPost<LockAttestation>("/atlas/lock-attestation", { contract_address: contract });
       setAtt(attestation);
 
       // The attestation is bound to a specific chain; make sure the wallet is on it.

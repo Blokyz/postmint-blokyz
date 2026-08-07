@@ -5,8 +5,9 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAccount } from "wagmi";
 import { Crest } from "@/components/Crest";
+import { InfoTip } from "@/components/InfoTip";
 import { WalletAvatar } from "@/components/WalletAvatar";
-import { API_URL, shortAddr } from "@/lib/api";
+import { apiGet, shortAddr } from "@/lib/api";
 import { useCollection } from "@/lib/collection";
 
 const display = displayFont;
@@ -55,12 +56,7 @@ export default function StandingsPage() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/standings/${contract}`);
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.detail ?? `No standings for this collection (${res.status})`);
-      }
-      setData(await res.json());
+      setData(await apiGet<Standings>(`/standings/${contract}`));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load standings");
       setData(null);
@@ -96,7 +92,10 @@ export default function StandingsPage() {
       <header className="lb-hero">
         <span className="rc-kicker">RACE CONTROL // {display_name}</span>
         <h1 className="lb-title">Championship Standings</h1>
-        <p className="lb-hero-sub">See who&apos;s securing crests — or dive into the tier grid.</p>
+        <p className="lb-hero-sub">
+          See who&apos;s securing crests — or dive into the tier grid.
+          <InfoTip text="Championship Points (CP) are earned for every slot won on-chain — rarer tiers pay more. A Crest lights up for each tier a driver has secured." />
+        </p>
       </header>
 
       <div className="lb-tabs">

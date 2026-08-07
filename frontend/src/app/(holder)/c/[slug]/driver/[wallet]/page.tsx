@@ -6,7 +6,7 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useAccount } from "wagmi";
 import { Crest } from "@/components/Crest";
-import { ADDRESS_RE, API_URL, shortAddr } from "@/lib/api";
+import { ADDRESS_RE, apiGet, shortAddr } from "@/lib/api";
 import { useCollection } from "@/lib/collection";
 import { CrestState, STATE_META } from "@/lib/crests";
 
@@ -49,12 +49,7 @@ export default function DriverPage() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/driver/${contract}/${wallet}`);
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.detail ?? `No driver card for this collection (${res.status})`);
-      }
-      setData(await res.json());
+      setData(await apiGet<Driver>(`/driver/${contract}/${wallet}`));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load driver card");
       setData(null);

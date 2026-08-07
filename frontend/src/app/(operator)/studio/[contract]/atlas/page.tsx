@@ -27,6 +27,7 @@ type Feasibility = {
   max_sets_formable: number | null;
   race_intensity: number | null;
   fit_score: number | null;
+  suggested_cap?: number | null;
 };
 
 type TierEntry = {
@@ -62,12 +63,16 @@ type AtlasManifest = {
 
 // Mirrors backend DEFAULT_TIER_STRUCTURE incl. the graduated count_required ramp
 // (set size escalates with rarity so no tier is a trivial "hold one token").
+// Windows are FLAT (2026-08-04): holding derives from on-chain acquisition
+// history, so every non-Common tier holds 24h and Common is instant — the
+// window is no longer an operator lever ("Reset to defaults" normalizes old
+// manifests that still carry the pre-flat 72-336h values).
 const DEFAULT_TIER_STRUCTURE: Record<string, TierConfig> = {
   Common: { cap: 1000, holding_window_hours: 0, count_required: 1 },
   Uncommon: { cap: 750, holding_window_hours: 24, count_required: 2 },
-  Rare: { cap: 500, holding_window_hours: 72, count_required: 2 },
-  "Super Rare": { cap: 250, holding_window_hours: 168, count_required: 3 },
-  Mythic: { cap: 50, holding_window_hours: 336, count_required: 3 },
+  Rare: { cap: 500, holding_window_hours: 24, count_required: 2 },
+  "Super Rare": { cap: 250, holding_window_hours: 24, count_required: 3 },
+  Mythic: { cap: 50, holding_window_hours: 24, count_required: 3 },
 };
 
 // Set-size slider bounds (tokens a wallet must hold from the band).
@@ -95,14 +100,21 @@ const FIT_MIN = 2;
 const FIT_MAX = 5;
 const FIT_DISPLAY_MAX = 6;
 
+// Cap slider floor is 1 (not default*0.25): real collections' qualifier counts
+// often demand caps far below the defaults to reach a healthy fit, incl. the
+// suggested cap (e.g. a 3-qualifier Mythic wants cap 1).
 function capRange(tier: string): [number, number] {
-  const d = DEFAULT_TIER_STRUCTURE[tier].cap;
-  return [Math.max(1, Math.round(d * 0.25)), d * 4];
+  return [1, DEFAULT_TIER_STRUCTURE[tier].cap * 4];
 }
 
-function windowRange(tier: string): [number, number] {
-  const d = DEFAULT_TIER_STRUCTURE[tier].holding_window_hours;
-  return [0, Math.max(d * 2, 168)];
+// Mirror of the backend suggestion (feasibility.suggested_cap = qualifiers /
+// fit target 3.0, clamped >= 1) — fallback for manifests generated before the
+// field existed. Keep in lockstep with atlas/rules.py.
+function suggestedCap(feas: Feasibility | null): number | null {
+  if (!feas) return null;
+  if (feas.suggested_cap != null) return feas.suggested_cap;
+  if (!feas.estimated_qualifiers) return null;
+  return Math.max(1, Math.round(feas.estimated_qualifiers / 3));
 }
 
 function ruleSummary(t: TierEntry): string {
@@ -160,20 +172,17 @@ function TierCard({
   tier,
   override,
   onChangeCap,
-  onChangeWindow,
   onChangeCount,
   onReset,
 }: {
   tier: TierEntry;
   override: TierConfig;
   onChangeCap: (v: number) => void;
-  onChangeWindow: (v: number) => void;
   onChangeCount: (v: number) => void;
   onReset: () => void;
 }) {
   const color = TIER_COLOR[tier.tier] ?? "#7c8aa3";
   const [capMin, capMax] = capRange(tier.tier);
-  const [winMin, winMax] = windowRange(tier.tier);
   const feas = tier.feasibility;
   const defaults = DEFAULT_TIER_STRUCTURE[tier.tier];
   const isDefault =
@@ -182,6 +191,8 @@ function TierCard({
     override.count_required === defaults.count_required;
   const fit = feas?.fit_score ?? null;
   const healthy = !tier.low_feasibility;
+  const suggestion = suggestedCap(feas);
+  const showSuggestion = !healthy && suggestion !== null && suggestion !== override.cap;
 
   return (
     <article className="atlas-tier" style={{ "--tier-color": color } as React.CSSProperties}>
@@ -202,6 +213,18 @@ function TierCard({
           {healthy ? "Healthy race" : "Low feasibility"}
         </span>
       </div>
+
+      {showSuggestion && (
+        <div className="atlas-suggest">
+          <span>
+            Suggested cap <b>{suggestion.toLocaleString()}</b> → fit ≈{" "}
+            {feas ? (feas.estimated_qualifiers / suggestion).toFixed(1) : "—"}
+          </span>
+          <button type="button" className="atlas-suggest-apply" onClick={() => onChangeCap(suggestion)}>
+            Apply
+          </button>
+        </div>
+      )}
 
       <FitGauge fitScore={fit} color={color} />
 
@@ -267,20 +290,18 @@ function TierCard({
             onChange={(e) => onChangeCap(Number(e.target.value))}
           />
         </label>
-        <label className="atlas-control">
+        <div className="atlas-control">
           <span className="atlas-control-label">
-            Holding window <b>{override.holding_window_hours}h</b>
+            Holding window{" "}
+            {/* Flat rule is code-authoritative backend-side: anything non-zero
+                enforces 24h, so display that even if an old manifest still
+                stores a pre-flat value. */}
+            <b>{override.holding_window_hours === 0 ? "instant" : "24h"}</b>
           </span>
-          <input
-            type="range"
-            className="atlas-slider"
-            min={winMin}
-            max={winMax}
-            step={1}
-            value={override.holding_window_hours}
-            onChange={(e) => onChangeWindow(Number(e.target.value))}
-          />
-        </label>
+          <span className="atlas-control-note">
+            Derived from on-chain holding history — not tunable. Long holders claim immediately.
+          </span>
+        </div>
         <button type="button" className="atlas-reset" onClick={onReset} disabled={isDefault}>
           Reset to defaults
         </button>
@@ -382,10 +403,6 @@ export default function AtlasPage() {
     setOverrides((prev) => ({ ...prev, [tier]: { ...prev[tier], cap } }));
   }
 
-  function setWindow(tier: string, holding_window_hours: number) {
-    setOverrides((prev) => ({ ...prev, [tier]: { ...prev[tier], holding_window_hours } }));
-  }
-
   function setCount(tier: string, count_required: number) {
     setOverrides((prev) => ({ ...prev, [tier]: { ...prev[tier], count_required } }));
   }
@@ -455,6 +472,16 @@ export default function AtlasPage() {
               <span>Atlas ID</span>
               <code>{manifest.atlas_manifest_id.slice(0, 8)}</code>
             </div>
+            <div className="atlas-summary__actions">
+              <button
+                type="button"
+                onClick={handleRegenerate}
+                disabled={regenerating || !dirty}
+                className="atlas-regenerate"
+              >
+                {regenerating ? "Regenerating…" : dirty ? "Regenerate with new tiers" : "No changes to apply"}
+              </button>
+            </div>
           </section>
 
           {manifest.ladders.length > 0 && (
@@ -477,7 +504,6 @@ export default function AtlasPage() {
                 tier={tier}
                 override={overrides[tier.tier] ?? DEFAULT_TIER_STRUCTURE[tier.tier]}
                 onChangeCap={(v) => setCap(tier.tier, v)}
-                onChangeWindow={(v) => setWindow(tier.tier, v)}
                 onChangeCount={(v) => setCount(tier.tier, v)}
                 onReset={() => resetTier(tier.tier)}
               />
@@ -485,9 +511,6 @@ export default function AtlasPage() {
           </div>
 
           <div className="atlas-actions">
-            <button type="button" onClick={handleRegenerate} disabled={regenerating || !dirty} className="atlas-regenerate">
-              {regenerating ? "Regenerating…" : dirty ? "Regenerate with new tiers" : "No changes to apply"}
-            </button>
             <Link href={`/studio/${contract}/publish`} className="atlas-publish-link">
               Continue to Publish ▸
             </Link>

@@ -115,7 +115,7 @@ export default function PipelineOverview() {
       detail: atlas
         ? "Tiers generated & tuned — ready to publish / lock."
         : approved
-          ? "Slice tiers, tune caps & holding windows, lock on-chain."
+          ? "Slice tiers, tune caps & set sizes, lock on-chain."
           : "Approve the ranking first.",
     },
     {

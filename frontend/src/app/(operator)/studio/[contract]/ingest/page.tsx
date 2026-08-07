@@ -1,10 +1,13 @@
 "use client";
 
+import { ConnectButton } from "@rainbow-me/rainbowkit";
 import Link from "next/link";
 import { Chakra_Petch, JetBrains_Mono } from "next/font/google";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useAccount, useSignMessage } from "wagmi";
 import { shortAddr } from "@/lib/api";
+import { buildIngestMessage } from "@/lib/ingest";
 
 const hud = Chakra_Petch({
   subsets: ["latin"],
@@ -80,6 +83,8 @@ function TelemetryRow({ label, value, tone }: { label: string; value: string; to
 export default function IngestPage() {
   const params = useParams();
   const contract = String(params.contract ?? "").toLowerCase();
+  const { address, isConnected } = useAccount();
+  const { signMessageAsync } = useSignMessage();
 
   const [chain, setChain] = useState("eth");
   const [status, setStatus] = useState<Status | null>(null);
@@ -124,10 +129,23 @@ export default function IngestPage() {
     setError(null);
     setStarting(true);
     try {
+      // Operator authorization: sign the ingest message when a wallet is
+      // connected. Harmless in dev (allowlist off → backend ignores it);
+      // required once the platform sets its operator allowlist. issued_at is
+      // bound into the signature — the backend rejects stale ones.
+      let auth: { operator_address?: string; signature?: string; issued_at?: number } = {};
+      if (isConnected && address) {
+        const issuedAt = Math.floor(Date.now() / 1000);
+        const signature = await signMessageAsync({
+          message: buildIngestMessage(contract, chain, issuedAt),
+        });
+        auth = { operator_address: address, signature, issued_at: issuedAt };
+      }
+
       const res = await fetch(`${API_URL}/audit/ingest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contract_address: contract, chain }),
+        body: JSON.stringify({ contract_address: contract, chain, ...auth }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
@@ -201,6 +219,12 @@ export default function IngestPage() {
           Source chain is where the collection lives — BAYC → ETH. Re-running an active target resumes it
           from the last cursor.
         </p>
+        {!isConnected && (
+          <div className="ic-connect">
+            <span className="ic-hint">Connect your operator wallet to sign the ingest authorization.</span>
+            <ConnectButton accountStatus="address" chainStatus="none" showBalance={false} />
+          </div>
+        )}
         {error && <p className="ic-alert-line">⨯ {error}</p>}
       </section>
 

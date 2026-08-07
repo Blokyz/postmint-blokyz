@@ -41,7 +41,7 @@ export function buildPublishMessage(contract: string, slug: string, displayName:
 }
 
 // Resolve a slug → collection. Throws ApiError(404) if the slug is free.
-export const getCollection = (slug: string) => apiGet<Collection>(`/collections/${slug}`);
+export const getCollection = (slug: string, options?: RequestInit) => apiGet<Collection>(`/collections/${slug}`, options);
 
 // Directory listing (published by default).
 export const listCollections = () => apiGet<CollectionSummary[]>(`/collections`);

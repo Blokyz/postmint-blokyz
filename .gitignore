@@ -39,6 +39,11 @@ backend/data/manifests/
 backend/output/
 *.log
 
+# Verification screenshots (regenerate via frontend/scripts/*.mjs harnesses)
+frontend/*.png
+frontend/scripts/*.png
+frontend/scripts/review-studio/
+
 
 CLAUDE.md
 IMPLEMENTATION.md

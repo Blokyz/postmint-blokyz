@@ -147,77 +147,6 @@ input[type="text"] {
   flex: 1;
 }
 
-.trait-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.trait-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid #27272a;
-  border-radius: 8px;
-  background: #18181b;
-}
-
-.trait-handle {
-  cursor: grab;
-  color: var(--muted);
-  user-select: none;
-  touch-action: none;
-}
-
-.trait-rank {
-  width: 2.5rem;
-  flex-shrink: 0;
-}
-
-.trait-name {
-  flex: 1;
-}
-
-.trait-score {
-  font-variant-numeric: tabular-nums;
-}
-
-.trait-pin {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.85rem;
-  color: var(--muted);
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.weight-control {
-  border: 1px solid #27272a;
-  border-radius: 8px;
-  background: #18181b;
-  padding: 0.75rem 1rem;
-  margin-bottom: 1rem;
-}
-
-.weight-control-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 0.5rem;
-  font-size: 0.9rem;
-}
-
-.weight-control input[type="range"] {
-  width: 100%;
-  accent-color: var(--accent);
-}
-
-.weight-control input[type="range"]:disabled {
-  opacity: 0.4;
-}
-
 /* ── Ingest console — telemetry reactor ─────────────────────────────── */
 
 main.ingest-console {
@@ -233,7 +162,7 @@ main.ingest-console {
 
   position: relative;
   z-index: 1;
-  max-width: 1080px;
+  max-width: min(1760px, 96vw);
   min-height: calc(100vh - 54px);
   padding: 2.5rem 1.5rem 4rem;
   color: var(--txt);
@@ -536,6 +465,19 @@ main.ingest-console > section {
   font-family: var(--font-mono), monospace;
   font-size: 0.8rem;
   color: var(--danger);
+}
+
+/* Operator wallet prompt — sign the ingest authorization before INITIATE. */
+.ic-connect {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.ic-connect .ic-hint {
+  margin: 0;
 }
 
 /* Readout: reactor gauge + pipeline/telemetry. */
@@ -894,7 +836,7 @@ main.approve-ledger {
   --muted: #6d8789;
   --danger: #ff5a6e;
 
-  max-width: 880px;
+  max-width: min(1760px, 96vw);
   padding: 2.5rem 1.5rem 4rem;
   color: var(--txt);
   font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
@@ -1393,7 +1335,7 @@ main.approve-ledger > * {
 /* ── Set Atlas console ──────────────────────────────────────────────── */
 
 main.atlas-main {
-  max-width: 1240px;
+  max-width: min(1760px, 96vw);
   font-family: var(--font-mono), ui-monospace, monospace;
 }
 
@@ -1447,6 +1389,14 @@ main.atlas-main {
   gap: 0.3rem;
 }
 
+/* Regenerate lives at the far end of the summary bar, opposite the stats. */
+.atlas-summary__actions {
+  margin-left: auto;
+  flex-direction: row;
+  align-items: center;
+  align-self: center;
+}
+
 .atlas-summary span {
   font-size: 0.6rem;
   letter-spacing: 0.14em;
@@ -1475,11 +1425,22 @@ main.atlas-main {
   color: var(--muted);
 }
 
+/* One column per tier — the tier model is fixed at 5, so all cards share one
+   row on desktop instead of auto-fill's 4+1 wrap at mid widths. */
 .atlas-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 1rem;
   margin-bottom: 1.5rem;
+}
+@media (max-width: 1200px) {
+  .atlas-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 860px) {
+  .atlas-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .atlas-grid { grid-template-columns: 1fr; }
 }
 
 .atlas-tier {
@@ -1492,6 +1453,24 @@ main.atlas-main {
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
+  /* `translate` (not `transform`) so the lift composes with the glow layer. */
+  transition: translate 0.18s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+/* Hover lift — the card rises above its neighbors (raised z-index) with a
+   tier-colored shadow, so it clearly elevates relative to the rest of the row. */
+.atlas-tier:hover {
+  translate: 0 -6px;
+  z-index: 2;
+  border-color: color-mix(in srgb, var(--tier-color) 55%, #27272a);
+  box-shadow:
+    0 16px 36px rgba(0, 0, 0, 0.4),
+    0 0 26px color-mix(in srgb, var(--tier-color) 22%, transparent);
+}
+html[data-theme="light"] .atlas-tier:hover {
+  box-shadow:
+    0 16px 34px rgba(25, 55, 75, 0.18),
+    0 0 24px color-mix(in srgb, var(--tier-color) 26%, transparent);
 }
 
 .atlas-tier-head {
@@ -1692,6 +1671,49 @@ main.atlas-main {
   font-variant-numeric: tabular-nums;
 }
 
+/* Fixed (non-tunable) control readout — the flat holding window. */
+.atlas-control-note {
+  font-size: 0.68rem;
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+/* Low-feasibility fix-it hint: the cap that lands the tier in the healthy band. */
+.atlas-suggest {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0.4rem 0 0.1rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px dashed var(--tier-color, var(--accent));
+  border-radius: 6px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.atlas-suggest b {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.atlas-suggest-apply {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: transparent;
+  border: 1px solid var(--tier-color, var(--accent));
+  border-radius: 5px;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.atlas-suggest-apply:hover {
+  background: var(--tier-color, var(--accent));
+  color: #0a0d11;
+}
+
 .atlas-slider {
   width: 100%;
   -webkit-appearance: none;
@@ -1761,7 +1783,7 @@ main.atlas-main {
 /* ── Set Atlas — on-chain lock ──────────────────────────────────────── */
 
 .lock-panel {
-  max-width: 1240px;
+  max-width: none; /* fills atlas-main, which now governs the page width */
   margin: 0 auto 3rem;
   padding: 1.5rem 1.6rem;
   border: 1px solid #1d2a2a;
@@ -2043,43 +2065,6 @@ a.lock-note:hover,
   text-transform: uppercase;
   color: var(--rc-dim);
   margin-bottom: 0.9rem;
-}
-.rc-form {
-  display: flex;
-  gap: 0.8rem;
-  flex-wrap: wrap;
-}
-.rc-input-wrap {
-  flex: 1 1 320px;
-  display: flex;
-  align-items: stretch;
-  border: 1px solid var(--rc-line);
-  border-radius: 8px;
-  overflow: hidden;
-  background: #0c0e11;
-}
-.rc-input-prefix {
-  display: flex;
-  align-items: center;
-  padding: 0 0.9rem;
-  font-size: 0.66rem;
-  letter-spacing: 0.16em;
-  color: var(--rc-go);
-  background: rgba(198, 242, 78, 0.06);
-  border-right: 1px solid var(--rc-line);
-}
-.rc-input {
-  flex: 1;
-  border: 0;
-  background: transparent;
-  color: var(--rc-ink);
-  font-family: inherit;
-  font-size: 0.9rem;
-  padding: 0.8rem 0.9rem;
-  outline: none;
-}
-.rc-input::placeholder {
-  color: #4b525c;
 }
 .rc-load {
   display: inline-flex;
@@ -3046,17 +3031,6 @@ a.lock-note:hover,
   align-items: center;
   gap: 1rem;
 }
-.dir-forprojects {
-  color: var(--rc-dim);
-  text-decoration: none;
-  font-size: 0.78rem;
-  letter-spacing: 0.08em;
-  white-space: nowrap;
-}
-.dir-forprojects:hover {
-  color: var(--rc-go);
-}
-
 .dir-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -3092,6 +3066,20 @@ a.lock-note:hover,
   display: flex;
   gap: 0.3rem;
   flex-wrap: wrap;
+}
+.dir-finished-head {
+  margin: 2.4rem 0 1rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--rc-dim);
+}
+.dir-grid--finished .dir-card {
+  opacity: 0.55;
+}
+.dir-grid--finished .dir-card:hover {
+  opacity: 1;
 }
 .dir-status {
   font-size: 0.62rem;
@@ -3209,7 +3197,7 @@ a.lock-note:hover,
 
 /* Slug-resolving layout states + race connect bar */
 .collection-shell {
-  min-height: 60vh;
+  min-height: calc(100vh - 54px); /* fill below the sticky SiteHeader */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3276,7 +3264,7 @@ a.lock-note:hover,
    it inherited 720px). Give it a proper wide container that spreads across the
    page instead of a cramped centre column. */
 main.race-control {
-  max-width: 1360px;
+  max-width: min(1760px, 96vw);
   padding-left: clamp(1.25rem, 4vw, 3rem);
   padding-right: clamp(1.25rem, 4vw, 3rem);
 }
@@ -3379,7 +3367,7 @@ main.studio {
   --sd-warn: #ffb454;
   --sd-danger: #ff6d7d;
 
-  max-width: 940px;
+  max-width: min(1500px, 96vw);
   min-height: calc(100vh - 54px);
   padding: 2.5rem 1.5rem 4rem;
   color: var(--sd-txt);
@@ -3412,8 +3400,7 @@ main.studio {
   margin: 0;
   color: #f2f7fb;
 }
-.studio-viewlive,
-.studio-foot a {
+.studio-viewlive {
   color: var(--sd-accent);
   text-decoration: none;
   font-size: 0.9rem;
@@ -3518,8 +3505,6 @@ main.studio {
 }
 .studio-badge.is-live { color: var(--sd-ok); }
 .studio-row-go { color: var(--sd-accent); font-weight: 700; }
-.studio-foot { margin-top: 2.5rem; }
-
 /* Pipeline overview */
 .studio-pipeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.85rem; }
 .studio-stage {
@@ -3792,3 +3777,1717 @@ main.studio {
   background: rgba(255, 180, 84, 0.06);
 }
 .op-scope .atlas-ladder-banner strong { color: var(--op-warn); }
+
+/* ── Complete Your Set — Shopping Guidance Panel ───────────────────── */
+
+.rc-shopping {
+  margin-top: 0.85rem;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+  padding-top: 0.75rem;
+}
+
+.rc-shopping-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: var(--accent, #ffd23f);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.rc-shopping-toggle:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.rc-shopping-toggle-text {
+  flex: 1;
+  text-align: left;
+}
+
+.rc-shopping-arrow {
+  font-size: 0.65rem;
+  opacity: 0.7;
+}
+
+.rc-shopping-body {
+  margin-top: 0.65rem;
+  padding: 0.85rem 0.95rem;
+  background: rgba(10, 12, 16, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  animation: rcFadeIn 0.2s ease-out;
+}
+
+@keyframes rcFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.rc-shopping-loading {
+  margin: 0;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.5);
+  font-style: italic;
+}
+
+.rc-shopping-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.rc-shopping-badge {
+  align-self: flex-start;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.15em;
+  font-weight: 700;
+  color: #ffd23f;
+  background: rgba(255, 210, 63, 0.12);
+  border: 1px solid rgba(255, 210, 63, 0.3);
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+}
+
+.rc-shopping-lede {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.rc-shopping-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.rc-shopping-subhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.rc-shopping-subhead-hint {
+  font-size: 0.6rem;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.rc-shopping-traits {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 0.5rem;
+}
+
+.rc-shopping-trait-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 0.65rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+}
+
+/* One fixed line per card: cat · value (ellipsized) · count pinned right — no
+   wrapping, so every card in the grid has the identical layout and height. */
+.rc-shopping-trait-info {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  min-width: 0;
+}
+
+.rc-shopping-trait-cat {
+  flex: none;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.5);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.68rem;
+}
+
+.rc-shopping-trait-val {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  color: #fff;
+  /* Full trait name always shown — wraps when long. Cards in the same grid row
+     stretch to equal height and the links row is bottom-pinned, so alignment
+     survives a two-line value. */
+  overflow-wrap: anywhere;
+}
+
+.rc-shopping-trait-count {
+  flex: none;
+  white-space: nowrap;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.62rem;
+  color: #6fd08c;
+  background: rgba(111, 208, 140, 0.12);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  margin-left: auto;
+}
+
+.rc-shopping-links {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: auto; /* pin to the card bottom so equal-height cards align */
+}
+
+.rc-shopping-btn {
+  flex: 1;
+  text-align: center;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.64rem;
+  font-weight: 600;
+  padding: 0.25rem 0.4rem;
+  border-radius: 5px;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.rc-shopping-btn.os {
+  background: rgba(32, 129, 226, 0.18);
+  border: 1px solid rgba(32, 129, 226, 0.4);
+  color: #5aa9ff;
+}
+
+.rc-shopping-btn.os:hover {
+  background: rgba(32, 129, 226, 0.35);
+}
+
+.rc-shopping-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.rc-shopping-token-chip {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  color: #ffd23f;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.rc-shopping-token-chip:hover {
+  background: rgba(255, 210, 63, 0.15);
+  border-color: rgba(255, 210, 63, 0.4);
+}
+
+.rc-shopping-impact {
+  padding: 0.6rem 0.75rem;
+  background: linear-gradient(135deg, rgba(192, 123, 255, 0.12), rgba(90, 169, 255, 0.08));
+  border: 1px solid rgba(192, 123, 255, 0.3);
+  border-radius: 8px;
+}
+
+.rc-shopping-impact-title {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #c07bff;
+  margin-bottom: 0.25rem;
+}
+
+.rc-shopping-impact-desc {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* ── Modal Backdrop & Card (Claim Framing) ────────────────────────── */
+
+.rc-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(8px);
+  padding: 1rem;
+}
+
+.rc-modal-card {
+  width: 100%;
+  max-width: 480px;
+  background: #0f1217;
+  border: 1px solid rgba(198, 242, 78, 0.3);
+  border-radius: 16px;
+  padding: 1.5rem;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), 0 0 30px rgba(198, 242, 78, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  animation: rcModalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes rcModalPop {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.rc-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.rc-modal-kicker {
+  display: block;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #c6f24e;
+}
+
+.rc-modal-title {
+  margin: 0.2rem 0 0 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: 1.35rem;
+  color: #ffffff;
+}
+
+.rc-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.rc-modal-desc {
+  margin: 0;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.8);
+  line-height: 1.4;
+}
+
+.rc-modal-details {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.75rem;
+}
+
+.rc-modal-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.rc-modal-label {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.rc-modal-val {
+  color: #ffffff;
+  font-weight: 600;
+  text-align: right;
+}
+
+.rc-modal-notice {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 210, 63, 0.08);
+  border: 1px solid rgba(255, 210, 63, 0.25);
+  border-radius: 8px;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.85);
+  line-height: 1.4;
+}
+
+.rc-modal-notice-icon {
+  font-size: 1.1rem;
+}
+
+.rc-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+/* ── Rules & Mechanics Page ────────────────────────────────────────── */
+
+.rc-rules-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.rc-rules-card {
+  background: rgba(18, 22, 28, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.rc-rules-h2 {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: 1.25rem;
+  color: #c6f24e;
+}
+
+.rc-rules-h3 {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: 1.05rem;
+  color: #ffffff;
+}
+
+.rc-rules-p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.rc-rules-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.25rem;
+}
+
+.rc-rules-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.rc-rules-sub {
+  margin: 0.5rem 0 0 0;
+  font-size: 0.78rem;
+  color: #ffd23f;
+}
+
+.rc-rules-footer {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+/* ── InfoTip — "?" concept explainers ─────────────────────────────── */
+
+.itip {
+  position: relative;
+  display: inline-flex;
+  margin-left: 0.35rem;
+  vertical-align: middle;
+  cursor: help;
+  outline: none;
+}
+
+.itip-q {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1px solid rgba(245, 197, 24, 0.55);
+  color: rgba(245, 197, 24, 0.85);
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1;
+  user-select: none;
+}
+
+.itip:hover .itip-q,
+.itip:focus .itip-q {
+  background: rgba(245, 197, 24, 0.15);
+  color: #f5c518;
+}
+
+.itip-bubble {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 240px;
+  padding: 0.6rem 0.7rem;
+  border-radius: 10px;
+  border: 1px solid rgba(245, 197, 24, 0.25);
+  background: #17130a;
+  color: rgba(255, 255, 255, 0.88);
+  font-family: var(--font-race-mono), monospace;
+  font-size: 0.7rem;
+  font-weight: 400;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  white-space: normal;
+  text-align: left;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease;
+  pointer-events: none;
+  z-index: 30;
+}
+
+.itip:hover .itip-bubble,
+.itip:focus .itip-bubble {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Keep the bubble on-screen when the tip sits near the viewport edge. */
+@media (max-width: 640px) {
+  .itip-bubble {
+    left: auto;
+    right: -12px;
+    transform: none;
+    width: 200px;
+  }
+}
+
+/* ── Mobile Polish (<480px) ────────────────────────────────────────── */
+
+@media (max-width: 480px) {
+  /* Nav: let the link row wrap under the brand instead of overflowing. */
+  .site-nav {
+    flex-wrap: wrap;
+    padding: 0.5rem 0.75rem;
+    row-gap: 0.35rem;
+  }
+  .site-nav__links {
+    flex-wrap: wrap;
+    row-gap: 0.25rem;
+  }
+
+  .rc-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  /* Race lane: position gutter becomes a slim strip, tighter padding, and the
+     scoreboard digits scale down so HH:MM:SS fits the column. */
+  .rc-lane-pos {
+    width: 34px;
+  }
+  .rc-pos-num {
+    font-size: 1.1rem;
+  }
+  .rc-lane-main {
+    padding: 0.85rem 0.9rem;
+  }
+  .rc-lane-head {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+  }
+  .rc-tier {
+    font-size: 1.2rem;
+  }
+  .rc-lane-grid {
+    gap: 0.9rem;
+  }
+  .rc-clock-time,
+  .rc-clock-idle,
+  .rc-clock-go,
+  .rc-clock-flag {
+    font-size: 1.5rem;
+  }
+  .rc-shopping-links {
+    flex-wrap: wrap;
+  }
+
+  /* Standings: stack the search/show controls; slim the board rows. */
+  .lb-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
+  }
+  .lb-row {
+    grid-template-columns: 28px 36px 1fr auto;
+    gap: 0.5rem;
+  }
+  .lb-crests {
+    display: none;
+  }
+
+  .rc-modal-card {
+    padding: 1.2rem;
+  }
+  .rc-modal-foot {
+    flex-wrap: wrap;
+  }
+}
+
+
+
+/* ==========================================================================
+   PostMint home — "/" front door (2026-07-31). Scoped under main.race-control.home.
+   Race-start hero: F1 start-light gantry sequences on load, lights out, then the
+   headline launches. Reuses the race-control token set + dir-card styles.
+   ========================================================================== */
+
+main.race-control.home {
+  max-width: min(1760px, 96vw);
+  padding-top: 1.6rem;
+  overflow: visible;
+}
+
+/* ---- Hero ---- */
+.home-hero {
+  text-align: center;
+  padding: clamp(2.5rem, 7vh, 5.5rem) 0 3.5rem;
+}
+
+.home-eyebrow {
+  font-family: var(--font-race-mono), monospace;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: var(--rc-dim);
+  margin: 0 0 1.1rem;
+}
+
+.home-headline {
+  margin: 0 auto 1.4rem;
+  font-family: var(--font-race-display), sans-serif;
+  font-weight: 600;
+  font-size: clamp(2.5rem, 7.2vw, 4.9rem);
+  line-height: 1.04;
+  letter-spacing: 0.01em;
+  color: var(--rc-ink);
+}
+.home-line {
+  display: block;
+  opacity: 0;
+  transform: translateY(18px);
+  animation: hlRise 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.home-line:nth-child(1) { animation-delay: 0.1s; }
+.home-line:nth-child(2) { animation-delay: 0.24s; }
+.home-line:nth-child(3) { animation-delay: 0.38s; }
+.home-line--gold {
+  color: var(--rc-go);
+  text-shadow: 0 0 34px rgba(245, 197, 24, 0.45);
+}
+@keyframes hlRise {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.home-lede {
+  max-width: 620px;
+  margin: 0 auto 1.9rem;
+  font-size: 1.02rem;
+  line-height: 1.65;
+  color: var(--rc-dim);
+  opacity: 0;
+  animation: hlRise 0.5s ease forwards 0.6s;
+}
+
+.home-cta-row {
+  display: flex;
+  justify-content: center;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+  opacity: 0;
+  animation: hlRise 0.5s ease forwards 0.75s;
+}
+.home-cta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  padding: 0.85rem 1.6rem;
+  border-radius: 999px;
+  font-family: var(--font-race-display), sans-serif;
+  font-size: 1.02rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.home-cta em {
+  font-style: normal;
+  font-family: var(--font-race-mono), monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.65;
+}
+.home-cta--gold {
+  background: var(--rc-go);
+  color: #131006;
+  box-shadow: 0 6px 24px rgba(245, 197, 24, 0.25);
+}
+.home-cta--gold:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 32px rgba(245, 197, 24, 0.4);
+}
+.home-cta--cyan {
+  border: 1px solid rgba(71, 214, 196, 0.55);
+  color: #47d6c4;
+  background: rgba(71, 214, 196, 0.05);
+}
+.home-cta--cyan:hover {
+  transform: translateY(-2px);
+  background: rgba(71, 214, 196, 0.12);
+  box-shadow: 0 8px 26px rgba(71, 214, 196, 0.18);
+}
+
+.home-ramp {
+  display: flex;
+  justify-content: center;
+  gap: 0.9rem;
+  margin-top: 2.6rem;
+  opacity: 0;
+  animation: hlRise 0.6s ease forwards 0.95s;
+}
+.home-ramp > * { transition: transform 0.18s ease; }
+.home-ramp > *:hover { transform: translateY(-5px) scale(1.06); }
+
+/* ---- Section kicker ---- */
+.home-kicker {
+  font-family: var(--font-race-mono), monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--rc-dim);
+  margin: 0 0 1.2rem;
+}
+
+/* ---- Live strip ---- */
+.home-live { padding: 0.8rem 0 2.6rem; }
+.home-live-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.home-live-all {
+  font-family: var(--font-race-mono), monospace;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--rc-go);
+  text-decoration: none;
+}
+.home-live-all:hover { text-decoration: underline; }
+
+/* ---- Responsive + motion ---- */
+@media (max-width: 480px) {
+  .home-hero { padding-top: 1.8rem; }
+  .home-ramp { flex-wrap: wrap; }
+  .home-cta { width: 100%; justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-line,
+  .home-lede,
+  .home-cta-row,
+  .home-ramp {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ==========================================================================
+   Light theme — html[data-theme="light"] overrides, appended last so they win
+   by cascade. Dark stays the default (and the SSR fallback); the root layout
+   inline script sets the attribute from localStorage before first paint.
+   Structure: retint the four palette var families (base :root, holder --rc-*,
+   operator --op-*, studio --sd-*), then patch the hardcoded dark spots that
+   do not flow through vars. The floating .theme-toggle lives at the bottom.
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+}
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f2f3f6;
+  --fg: #191a1e;
+  --muted: #5a616c;
+  --accent: #0c8f7f;
+}
+
+/* ---- Base chrome (nav, code, inputs — visible on approve etc.) ---- */
+html[data-theme="light"] .site-nav {
+  background: rgba(252, 249, 240, 0.92);
+  border-bottom: 1px solid #e3dac2;
+}
+html[data-theme="light"] .site-nav__brand {
+  border-right-color: #e3dac2;
+  color: #a97e08; /* nav sits outside .race-control, so --rc-gold never re-tints here */
+}
+html[data-theme="light"] .site-nav__link { color: #857a5c; }
+html[data-theme="light"] .site-nav__link:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #26200f;
+}
+html[data-theme="light"] .site-nav__link.is-active {
+  color: #131006;
+  background: #e2b60d;
+}
+html[data-theme="light"] code { background: #e7eaee; }
+html[data-theme="light"] input[type="text"] {
+  background: #ffffff;
+  color: var(--fg);
+}
+
+/* ---- Holder: race-control (home, paddock, landing, race, standings, driver,
+   rules). Warm cream + a darker gold for contrast on light. ---- */
+html[data-theme="light"] .race-control {
+  --rc-bg: #f6f1e3;
+  --rc-panel: #fffdf6;
+  --rc-panel-2: #f1e9d5;
+  --rc-line: #ddd2b6;
+  --rc-ink: #26200f;
+  --rc-dim: #857a5c;
+  --rc-go: #b8860b;
+  --rc-race: #d97a06;
+  --rc-flag: #e05442;
+  --rc-gold: #a97e08;
+}
+html[data-theme="light"] .rc-grain {
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.5) 0,
+    rgba(0, 0, 0, 0.5) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+html[data-theme="light"] .rc-chip,
+html[data-theme="light"] .rc-btn,
+html[data-theme="light"] .cb-tierbar,
+html[data-theme="light"] .lb-rank {
+  background: #f1e9d5;
+}
+html[data-theme="light"] .rc-meter { background: #e4dabe; }
+html[data-theme="light"] .rc-clock { background: #efe7d1; }
+html[data-theme="light"] .crest-count {
+  background: #fffdf6;
+  color: #8a6a06;
+}
+html[data-theme="light"] .dc-slot { background: #fffdf6; }
+html[data-theme="light"] .collection-shell { background: #f6f1e3; }
+html[data-theme="light"] .collection-loading { color: #4c7a02; }
+html[data-theme="light"] .collection-missing a { color: #4c7a02; }
+
+/* Shopping panel — flip the dark inset + white text to light equivalents. */
+html[data-theme="light"] .rc-shopping-body { background: rgba(255, 253, 246, 0.9); }
+html[data-theme="light"] .rc-shopping-toggle:hover { border-color: rgba(0, 0, 0, 0.22); }
+html[data-theme="light"] .rc-shopping-loading { color: rgba(0, 0, 0, 0.5); }
+html[data-theme="light"] .rc-shopping-badge { color: #8a6a06; }
+html[data-theme="light"] .rc-shopping-lede { color: rgba(0, 0, 0, 0.8); }
+html[data-theme="light"] .rc-shopping-subhead { color: rgba(0, 0, 0, 0.62); }
+html[data-theme="light"] .rc-shopping-subhead-hint { color: rgba(0, 0, 0, 0.42); }
+html[data-theme="light"] .rc-shopping-trait-cat { color: rgba(0, 0, 0, 0.52); }
+html[data-theme="light"] .rc-shopping-trait-val { color: #26200f; }
+html[data-theme="light"] .rc-shopping-token-chip { color: #8a6a06; }
+html[data-theme="light"] .rc-shopping-impact-title { color: #7c3aed; }
+html[data-theme="light"] .rc-shopping-impact-desc { color: rgba(0, 0, 0, 0.82); }
+
+/* Claim-confirm modal + rules page. */
+html[data-theme="light"] .rc-modal-backdrop { background: rgba(30, 26, 16, 0.5); }
+html[data-theme="light"] .rc-modal-card { background: #fffdf6; }
+html[data-theme="light"] .rc-modal-kicker { color: #4c7a02; }
+html[data-theme="light"] .rc-modal-title { color: #26200f; }
+html[data-theme="light"] .rc-modal-desc { color: rgba(0, 0, 0, 0.75); }
+html[data-theme="light"] .rc-modal-label { color: rgba(0, 0, 0, 0.5); }
+html[data-theme="light"] .rc-modal-val { color: #26200f; }
+html[data-theme="light"] .rc-modal-notice { color: rgba(0, 0, 0, 0.78); }
+html[data-theme="light"] .rc-rules-card { background: rgba(255, 253, 246, 0.85); }
+html[data-theme="light"] .rc-rules-h2 { color: #4c7a02; }
+html[data-theme="light"] .rc-rules-h3 { color: #26200f; }
+html[data-theme="light"] .rc-rules-p { color: rgba(0, 0, 0, 0.78); }
+html[data-theme="light"] .rc-rules-list { color: rgba(0, 0, 0, 0.78); }
+html[data-theme="light"] .rc-rules-sub { color: #8a6a06; }
+/* .itip-bubble stays dark in both modes — standard dark-tooltip pattern. */
+
+/* ---- Operator: op-scope (ingest / approve / atlas) + studio console.
+   Light slate + a deeper teal that keeps contrast on white. ---- */
+html[data-theme="light"] .op-scope {
+  --op-bg: #eef2f4;
+  --op-panel: #ffffff;
+  --op-panel2: #e4eaee;
+  --op-line: rgba(25, 55, 75, 0.16);
+  --op-txt: #182530;
+  --op-muted: #556876;
+  --op-accent: #0b8f80;
+  --op-accent2: #0a7c6f;
+  --op-accent-ink: #ffffff;
+  --op-ok: #148a54;
+  --op-warn: #a35f04;
+  --op-danger: #c02f3c;
+}
+html[data-theme="light"] .op-scope .site-nav {
+  background: rgba(248, 251, 252, 0.9);
+  border-bottom: 1px solid var(--op-line);
+}
+/* Re-assert the operator cyan over the generic light-nav gold (the holder
+   overrides above otherwise outrank .op-scope's rules by specificity). */
+html[data-theme="light"] .op-scope .site-nav__brand {
+  color: var(--op-accent);
+  border-right-color: var(--op-line);
+}
+html[data-theme="light"] .op-scope .site-nav__link { color: var(--op-muted); }
+html[data-theme="light"] .op-scope .site-nav__link:hover {
+  background: rgba(25, 55, 75, 0.08);
+  color: var(--op-txt);
+}
+html[data-theme="light"] .op-scope .site-nav__link.is-active {
+  color: var(--op-accent-ink);
+  background: var(--op-accent);
+}
+html[data-theme="light"] main.studio {
+  --sd-bg: #eef2f4;
+  --sd-panel: #ffffff;
+  --sd-panel2: #e4eaee;
+  --sd-line: rgba(25, 55, 75, 0.16);
+  --sd-txt: #182530;
+  --sd-muted: #556876;
+  --sd-accent: #0b8f80;
+  --sd-accent-ink: #ffffff;
+  --sd-ok: #148a54;
+  --sd-warn: #a35f04;
+  --sd-danger: #c02f3c;
+}
+html[data-theme="light"] .studio-h1 { color: #12202a; }
+
+/* Ingest console leftovers (hardcoded near-blacks). */
+html[data-theme="light"] .op-scope .ic-panel {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(240, 245, 247, 0.92));
+}
+html[data-theme="light"] .op-scope .ic-input-wrap,
+html[data-theme="light"] .op-scope .ic-chainset,
+html[data-theme="light"] .op-scope .ic-stage-node {
+  background: #f2f6f7;
+}
+html[data-theme="light"] .op-scope .ic-initiate:disabled { background: #dde5e9; }
+html[data-theme="light"] .op-scope .ic-input-static { color: #223543; }
+html[data-theme="light"] .op-scope .ic-fault-msg { color: #b3323f; }
+html[data-theme="light"] .op-scope .ic-readout {
+  background:
+    radial-gradient(circle at 28% 22%, rgba(11, 143, 128, 0.06), transparent 60%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(240, 245, 247, 0.92));
+}
+html[data-theme="light"] .op-scope .ic-fault {
+  background: linear-gradient(180deg, rgba(192, 47, 60, 0.08), rgba(240, 245, 247, 0.92));
+}
+html[data-theme="light"] .op-scope .ic-complete {
+  background: linear-gradient(180deg, rgba(11, 143, 128, 0.08), rgba(240, 245, 247, 0.92));
+}
+
+/* Approve ledger + atlas console leftovers. */
+html[data-theme="light"] .op-scope .al-ledger {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(240, 244, 246, 0.95));
+}
+html[data-theme="light"] .op-scope .atlas-summary,
+html[data-theme="light"] .op-scope .atlas-tier {
+  background: #ffffff;
+}
+html[data-theme="light"] .op-scope .atlas-gauge-track { background: #dde5e9; }
+html[data-theme="light"] .op-scope .atlas-chip { background: #eef2f4; }
+html[data-theme="light"] .op-scope .atlas-status.is-low { color: #a35f04; }
+html[data-theme="light"] .op-scope .atlas-error,
+html[data-theme="light"] .op-scope .lock-error {
+  color: #c0303c;
+}
+html[data-theme="light"] .op-scope .lock-panel {
+  background: linear-gradient(180deg, rgba(11, 143, 128, 0.06), rgba(240, 244, 246, 0.7));
+}
+html[data-theme="light"] .op-scope .lock-btn:disabled { background: #dde5e9; }
+html[data-theme="light"] .op-scope .lock-tuple { background: rgba(25, 55, 75, 0.06); }
+html[data-theme="light"] .op-scope .al-stat.is-accent {
+  background: linear-gradient(180deg, rgba(11, 143, 128, 0.1), rgba(240, 244, 246, 0.5));
+}
+
+/* ---- Global header (SiteHeader) ----
+   The PostMint home brand + theme toggle live in every nav; each section's own
+   links/actions merge in around them. */
+.site-nav__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* Section label — the second-level identity after the home brand (collection
+   name, "Studio", "The Paddock"). Dimmer than the brand, separated by a rule. */
+.site-nav__section {
+  font-family: var(--font-race-display), system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #f7f3ea;
+  text-decoration: none;
+  padding: 0.35rem 0.85rem 0.35rem 0;
+  margin-right: 0.5rem;
+  border-right: 1px solid #2e2a20;
+  white-space: nowrap;
+}
+.site-nav__section:hover { color: var(--rc-gold, #ffd21e); }
+.op-scope .site-nav__section {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 0.9rem;
+  color: var(--op-txt, #dce6ee);
+  border-right-color: var(--op-line, rgba(120, 150, 170, 0.16));
+}
+.op-scope .site-nav__section:hover { color: var(--op-accent, #47d6c4); }
+html[data-theme="light"] .site-nav__section {
+  color: #26200f;
+  border-right-color: #e3dac2;
+}
+html[data-theme="light"] .site-nav__section:hover { color: #a97e08; }
+html[data-theme="light"] .op-scope .site-nav__section {
+  color: var(--op-txt);
+  border-right-color: var(--op-line);
+}
+html[data-theme="light"] .op-scope .site-nav__section:hover { color: var(--op-accent); }
+
+/* Theme toggle — lives in the header's action cluster. */
+.theme-toggle {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(20, 20, 24, 0.75);
+  color: #f5f3ea;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.theme-toggle:hover { transform: scale(1.08); }
+html[data-theme="light"] .theme-toggle {
+  background: rgba(255, 255, 255, 0.88);
+  color: #4a4536;
+  border-color: rgba(0, 0, 0, 0.16);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+}
+
+/* ==========================================================================
+   Homepage bento grid (HomeBento.tsx) — Aceternity symmetric-bento inspired,
+   native CSS. 4-col symmetric layout [2·1·1]/[1·1·2]; cards bounce in with a
+   staggered rotateX reveal when .bento-grid gets .is-in; hover lift uses the
+   separate `translate` property so it composes with the animation's forwards
+   fill. Interiors are small CSS loops. Everything reads the race-control vars,
+   so light mode mostly comes free.
+   ========================================================================== */
+
+.home-bento {
+  margin: 4.5rem 0;
+}
+
+.bento-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  perspective: 1100px;
+}
+
+.bento-card {
+  --bento-accent: var(--rc-go);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 1.4rem 1.5rem;
+  border: 1px solid var(--rc-line);
+  border-radius: 20px;
+  background: linear-gradient(180deg, var(--rc-panel-2), var(--rc-panel));
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(30px) rotateX(10deg) scale(0.97);
+  transform-origin: 50% 100%;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, translate 0.18s ease;
+}
+.bento-card--w2 { grid-column: span 2; }
+
+.bento-grid.is-in .bento-card {
+  animation: bentoIn 0.7s cubic-bezier(0.34, 1.4, 0.44, 1) forwards;
+  animation-delay: calc(var(--bento-i, 0) * 0.1s);
+}
+@keyframes bentoIn {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.bento-card:hover {
+  translate: 0 -5px;
+  border-color: color-mix(in srgb, var(--bento-accent) 55%, var(--rc-line));
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35), 0 0 24px color-mix(in srgb, var(--bento-accent) 18%, transparent);
+}
+
+.bento-tag {
+  font-family: var(--font-race-mono), monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--bento-accent);
+}
+.bento-card h3 {
+  margin: 0;
+  font-family: var(--font-race-display), sans-serif;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--rc-ink);
+}
+.bento-card p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  color: var(--rc-dim);
+}
+
+.bento-card--cyan { --bento-accent: #38e1c8; }
+html[data-theme="light"] .bento-card--cyan { --bento-accent: #0b8f80; }
+
+.bento-viz {
+  margin-top: auto;
+  padding-top: 1rem;
+}
+.bento-viz-label {
+  display: block;
+  margin-top: 0.5rem;
+  font-family: var(--font-race-mono), monospace;
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  color: var(--rc-dim);
+}
+
+/* 01 — trait chips collect, meter fills. */
+.bento-chiprow {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+.bento-chip {
+  font-family: var(--font-race-mono), monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--rc-line);
+  color: var(--rc-dim);
+  animation: bentoChipOn 5s ease infinite;
+  animation-delay: calc(var(--chip-i, 0) * 0.55s);
+}
+@keyframes bentoChipOn {
+  0%, 12% {
+    border-color: var(--rc-line);
+    color: var(--rc-dim);
+    background: transparent;
+  }
+  22%, 86% {
+    border-color: var(--bento-accent);
+    color: var(--bento-accent);
+    background: color-mix(in srgb, var(--bento-accent) 10%, transparent);
+  }
+  100% {
+    border-color: var(--rc-line);
+    color: var(--rc-dim);
+    background: transparent;
+  }
+}
+.bento-meter {
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--rc-line) 60%, transparent);
+  overflow: hidden;
+}
+.bento-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--rc-race), var(--bento-accent));
+  animation: bentoFill 5s ease infinite;
+}
+@keyframes bentoFill {
+  0%, 10% { width: 8%; }
+  60%, 88% { width: 100%; }
+  100% { width: 8%; }
+}
+
+/* 02 — holding-window dial + scoreboard digits. */
+.bento-viz--clock {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+.bento-dial {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--bento-accent) 45%, var(--rc-line));
+}
+.bento-dial-hand {
+  position: absolute;
+  left: 50%;
+  bottom: 50%;
+  width: 2px;
+  height: 16px;
+  margin-left: -1px;
+  border-radius: 2px;
+  background: var(--bento-accent);
+  transform-origin: 50% 100%;
+  animation: bentoHand 6s linear infinite;
+}
+@keyframes bentoHand {
+  to { transform: rotate(360deg); }
+}
+.bento-clock-digits {
+  font-family: var(--font-race-mono), monospace;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--rc-ink);
+}
+.bento-clock-digits em {
+  font-style: normal;
+  color: var(--bento-accent);
+  animation: bentoBlink 1s steps(1) infinite;
+}
+@keyframes bentoBlink {
+  50% { opacity: 0.25; }
+}
+
+/* 03 — finish-order slots light up in sequence. */
+.bento-viz--slots {
+  display: flex;
+  gap: 0.45rem;
+}
+.bento-slot {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  border-radius: 9px;
+  border: 1px solid var(--rc-line);
+  font-family: var(--font-race-mono), monospace;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--rc-dim);
+  animation: bentoSlotOn 5s ease infinite;
+  animation-delay: calc(var(--slot-i, 0) * 0.45s);
+}
+@keyframes bentoSlotOn {
+  0%, 10% {
+    border-color: var(--rc-line);
+    color: var(--rc-dim);
+    background: transparent;
+  }
+  20%, 84% {
+    border-color: var(--bento-accent);
+    color: #131006;
+    background: var(--bento-accent);
+  }
+  100% {
+    border-color: var(--rc-line);
+    color: var(--rc-dim);
+    background: transparent;
+  }
+}
+
+/* Crests & CP — pop chip. */
+.bento-viz--crests {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+.bento-cp {
+  font-family: var(--font-race-mono), monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--bento-accent);
+  border: 1px solid color-mix(in srgb, var(--bento-accent) 45%, transparent);
+  border-radius: 999px;
+  padding: 0.25rem 0.6rem;
+  animation: bentoCp 3.4s ease infinite;
+}
+@keyframes bentoCp {
+  0%, 55% {
+    opacity: 0;
+    translate: 0 6px;
+  }
+  68%, 92% {
+    opacity: 1;
+    translate: 0 0;
+  }
+  100% { opacity: 0; }
+}
+
+/* Projects door — atlas tier bars rise (Common → Mythic ramp colors). */
+.bento-viz--bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  height: 58px;
+}
+.bento-bar {
+  flex: 1;
+  border-radius: 6px 6px 2px 2px;
+  transform-origin: 50% 100%;
+  animation: bentoBar 4.5s ease infinite;
+  animation-delay: calc(var(--bar-i, 0) * 0.3s);
+}
+.bento-bar:nth-child(1) { height: 100%; background: #8b93a7; }
+.bento-bar:nth-child(2) { height: 82%; background: #4f8fdd; }
+.bento-bar:nth-child(3) { height: 64%; background: #2fd0b4; }
+.bento-bar:nth-child(4) { height: 46%; background: #9b6ef3; }
+.bento-bar:nth-child(5) { height: 32%; background: #ffd23f; }
+@keyframes bentoBar {
+  0%, 8% { transform: scaleY(0.15); opacity: 0.5; }
+  28%, 88% { transform: scaleY(1); opacity: 1; }
+  100% { transform: scaleY(0.15); opacity: 0.5; }
+}
+
+.bento-cta {
+  margin-top: auto;
+  align-self: flex-start;
+  font-size: 0.9rem;
+  padding: 0.65rem 1.3rem;
+}
+.bento-card--door .bento-cta,
+.bento-card--cyan .bento-cta {
+  margin-top: 1rem;
+}
+
+@media (max-width: 980px) {
+  .bento-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .bento-grid { grid-template-columns: 1fr; }
+  .bento-card--w2 { grid-column: span 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bento-card {
+    opacity: 1;
+    transform: none;
+  }
+  .bento-grid.is-in .bento-card,
+  .bento-chip,
+  .bento-meter-fill,
+  .bento-dial-hand,
+  .bento-clock-digits em,
+  .bento-slot,
+  .bento-cp,
+  .bento-bar {
+    animation: none;
+  }
+  .bento-cp { opacity: 1; }
+}
+
+/* ==========================================================================
+   Hero beams + grid backdrop (Aceternity hero-section-with-beams-and-grid
+   inspired, native CSS). A masked line-grid sits behind the hero copy while
+   thin gold beams travel diagonally across on staggered loops. Decorative
+   only (aria-hidden); beams pause under prefers-reduced-motion.
+   ========================================================================== */
+
+.home-hero {
+  position: relative;
+}
+.home-hero > :not(.hero-bg) {
+  position: relative;
+  z-index: 1;
+}
+.hero-bg {
+  position: absolute;
+  inset: -2.5rem 0 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.hero-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--rc-line) 55%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--rc-line) 55%, transparent) 1px, transparent 1px);
+  background-size: 52px 52px;
+  mask-image: radial-gradient(ellipse 75% 85% at 50% 12%, black 25%, transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse 75% 85% at 50% 12%, black 25%, transparent 78%);
+}
+
+.hero-beam {
+  position: absolute;
+  top: -220px;
+  left: calc(8% + var(--beam-i, 0) * 19%);
+  width: 2px;
+  height: 190px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--rc-go) 85%, transparent) 55%,
+    var(--rc-race)
+  );
+  transform: rotate(38deg);
+  opacity: 0;
+  animation: heroBeam calc(4.2s + var(--beam-i, 0) * 0.9s) linear infinite;
+  animation-delay: calc(var(--beam-i, 0) * 1.5s);
+}
+@keyframes heroBeam {
+  0% {
+    opacity: 0;
+    translate: 0 0;
+  }
+  8% { opacity: 0.9; }
+  70% { opacity: 0.9; }
+  100% {
+    opacity: 0;
+    /* Slide along the beam's own 38° axis: x = -tan(38°) * y. */
+    translate: -484px 620px;
+  }
+}
+
+html[data-theme="light"] .hero-grid {
+  background-image:
+    linear-gradient(to right, rgba(120, 100, 40, 0.16) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(120, 100, 40, 0.16) 1px, transparent 1px);
+}
+html[data-theme="light"] .hero-beam {
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgba(184, 134, 11, 0.75) 55%,
+    #d97a06
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-beam { animation: none; opacity: 0; }
+}
+
+/* ==========================================================================
+   Global footer (SiteFooter.tsx) — Aceternity footer-with-big-text inspired.
+   Mounted once in the root layout (OUTSIDE .op-scope, so it carries one
+   consistent gold PostMint identity site-wide). Link columns + fine print,
+   then a giant gradient "POSTMINT" wordmark cropped by its wrapper's bottom
+   edge. Light theme handled at the end.
+   ========================================================================== */
+
+.site-footer {
+  position: relative;
+  overflow: hidden;
+  border-top: 1px solid #26221a;
+  background: #0b0a08;
+  font-family: var(--font-race-mono), ui-monospace, monospace;
+}
+
+.site-footer__inner {
+  position: relative;
+  z-index: 1;
+  max-width: min(1760px, 96vw);
+  margin: 0 auto;
+  padding: 3rem clamp(1rem, 4vw, 3rem) 1.4rem;
+}
+
+.site-footer__cols {
+  display: grid;
+  grid-template-columns: 1.6fr repeat(3, 1fr);
+  gap: 2rem;
+  padding-bottom: 2.2rem;
+}
+
+.site-footer__logo {
+  display: block;
+  font-family: var(--font-race-display), system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: #f5c518;
+  margin-bottom: 0.6rem;
+}
+.site-footer__brand p {
+  margin: 0;
+  max-width: 34ch;
+  font-size: 0.78rem;
+  line-height: 1.65;
+  color: #8d8266;
+}
+
+.site-footer__links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  font-size: 0.8rem;
+}
+.site-footer__links span {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #8d8266;
+  margin-bottom: 0.2rem;
+}
+.site-footer__links a {
+  color: #cfc5ad;
+  text-decoration: none;
+}
+.site-footer__links a:hover { color: #f5c518; }
+
+.site-footer__fine {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  padding-top: 1.2rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: #8d8266;
+}
+.site-footer__fine p { margin: 0; }
+
+/* The big text — oversized wordmark, gradient-filled, cropped at the bottom. */
+.site-footer__bigwrap {
+  position: relative;
+  height: clamp(84px, 13vw, 200px);
+  overflow: hidden;
+}
+.site-footer__big {
+  position: absolute;
+  left: 50%;
+  top: 8%;
+  transform: translateX(-50%);
+  font-family: var(--font-race-display), system-ui, sans-serif;
+  font-weight: 700;
+  font-size: clamp(5.2rem, 16vw, 16.5rem);
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  user-select: none;
+  background: linear-gradient(180deg, rgba(245, 197, 24, 0.3), rgba(245, 197, 24, 0.03) 92%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@media (max-width: 900px) {
+  .site-footer__cols { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 540px) {
+  .site-footer__cols { grid-template-columns: 1fr; gap: 1.4rem; }
+}
+
+html[data-theme="light"] .site-footer {
+  background: #efe9d8;
+  border-top-color: #ddd2b6;
+}
+html[data-theme="light"] .site-footer__logo { color: #a97e08; }
+html[data-theme="light"] .site-footer__brand p,
+html[data-theme="light"] .site-footer__links span,
+html[data-theme="light"] .site-footer__fine {
+  color: #857a5c;
+}
+html[data-theme="light"] .site-footer__links a { color: #4a4230; }
+html[data-theme="light"] .site-footer__links a:hover { color: #a97e08; }
+html[data-theme="light"] .site-footer__fine { border-top-color: rgba(0, 0, 0, 0.08); }
+html[data-theme="light"] .site-footer__big {
+  background: linear-gradient(180deg, rgba(169, 126, 8, 0.3), rgba(169, 126, 8, 0.04) 92%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+/* ==========================================================================
+   Skewed-lines background (Aceternity background-with-skewed-lines inspired,
+   native CSS). Applied to every holder page EXCEPT the home page (which has
+   the beams+grid hero instead): near-vertical diagonal hairlines on a 40px
+   rhythm, masked so they read at the top and bottom edges and fade out behind
+   the content area. Static texture — no animation. Colors ride --rc-line, so
+   light mode adapts automatically.
+   ========================================================================== */
+
+main.race-control::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--rc-line) 80%, var(--rc-go)) 0,
+    color-mix(in srgb, var(--rc-line) 80%, var(--rc-go)) 1px,
+    transparent 1px,
+    transparent 40px
+  );
+  opacity: 0.35;
+  mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.9),
+    transparent 30%,
+    transparent 70%,
+    rgba(0, 0, 0, 0.9)
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.9),
+    transparent 30%,
+    transparent 70%,
+    rgba(0, 0, 0, 0.9)
+  );
+}
+main.race-control.home::before {
+  content: none;
+}
+
+/* Operator side gets the same texture in its own cyan palette. One rule covers
+   studio home/overview/publish + ingest/approve/atlas — everything under
+   .op-scope. Children get lifted above the pseudo (same pattern race-control
+   already uses via `.race-control > *`). */
+.op-scope main {
+  position: relative;
+}
+.op-scope main::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--op-line) 75%, var(--op-accent)) 0,
+    color-mix(in srgb, var(--op-line) 75%, var(--op-accent)) 1px,
+    transparent 1px,
+    transparent 40px
+  );
+  opacity: 0.35;
+  mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.9),
+    transparent 30%,
+    transparent 70%,
+    rgba(0, 0, 0, 0.9)
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.9),
+    transparent 30%,
+    transparent 70%,
+    rgba(0, 0, 0, 0.9)
+  );
+}
+.op-scope main > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ==========================================================================
+   Glow cards — cursor-tracking hover glow (webflow glow-cards style).
+   GlowCards.tsx writes the pointer position into --gx/--gy on these surfaces;
+   the ::after radial spotlight fades in on hover. Selector list must stay in
+   lockstep with GLOW_SELECTOR in GlowCards.tsx. Each surface glows in its own
+   accent: bento cards their --bento-accent, holder cards gold, studio cyan,
+   atlas tiers their per-tier --tier-color.
+   ========================================================================== */
+
+.bento-card,
+.dir-card,
+.studio-stage,
+.studio-row,
+.atlas-tier {
+  position: relative;
+}
+
+.bento-card::after,
+.dir-card::after,
+.studio-stage::after,
+.studio-row::after,
+.atlas-tier::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  background: radial-gradient(
+    var(--glow-size, 240px) circle at var(--gx, 50%) var(--gy, 50%),
+    color-mix(in srgb, var(--glow-color, #f5c518) var(--glow-alpha, 16%), transparent),
+    transparent 70%
+  );
+}
+
+.bento-card:hover::after,
+.dir-card:hover::after,
+.studio-stage:hover::after,
+.studio-row:hover::after,
+.atlas-tier:hover::after {
+  opacity: 1;
+}
+
+.bento-card { --glow-color: var(--bento-accent); }
+.dir-card { --glow-color: var(--rc-go, #f5c518); }
+/* Short, very wide rows: a tighter + slightly stronger pool so the glow reads
+   as a spotlight tracking the cursor rather than a full-height horizontal wash
+   (a 240px circle is ~3x these cards' height). */
+.studio-stage,
+.studio-row {
+  --glow-color: var(--sd-accent, #47d6c4);
+  --glow-size: 130px;
+  --glow-alpha: 24%;
+}
+.atlas-tier { --glow-color: var(--tier-color, var(--accent)); }
+
+@media (prefers-reduced-motion: reduce) {
+  .bento-card::after,
+  .dir-card::after,
+  .studio-stage::after,
+  .studio-row::after,
+  .atlas-tier::after {
+    transition: none;
+  }
+}

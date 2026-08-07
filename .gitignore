@@ -40,9 +40,7 @@ backend/output/
 *.log
 
 # Verification screenshots (regenerate via frontend/scripts/*.mjs harnesses)
-frontend/*.png
-frontend/scripts/*.png
-frontend/scripts/review-studio/
+frontend/**/*.png
 
 
 CLAUDE.md

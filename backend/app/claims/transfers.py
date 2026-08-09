@@ -15,6 +15,8 @@ inclusively from `last_block`) is harmless.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
@@ -99,6 +101,9 @@ def poll_transfers(
 
     sync.last_block = max_block
     sync.cursor = None  # cursors aren't reused across cycles; from_block resumes us
+    # Explicit touch: `onupdate` only fires when a column changes, so an idle
+    # cycle (no new transfers) would otherwise look stale to /health/poller.
+    sync.updated_at = datetime.now(timezone.utc)
     db.flush()
 
     return {

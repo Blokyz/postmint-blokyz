@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     # their contract immediately. 0 disables (the test suite runs disabled).
     standings_cache_ttl_seconds: int = 30
 
+    # Celery beat cadence (seconds) for the transfer poller and the
+    # Claimed-event reconciler across all published collections. The schedule
+    # only runs when a beat process is started (scripts/run_celery_beat.ps1) —
+    # dev without beat behaves exactly as before. 0 removes a schedule entry.
+    transfer_poll_interval_seconds: int = 180
+    reconcile_interval_seconds: int = 600
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

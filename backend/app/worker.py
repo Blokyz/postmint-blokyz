@@ -39,6 +39,21 @@ celery_app.conf.update(
     worker_hostname=f"ingest@{_node_suffix}",
 )
 
+# Beat schedule — only fires when a beat process runs (scripts/run_celery_beat.ps1).
+# Both tasks are resumable/idempotent, so any cadence is safe.
+_beat_schedule = {}
+if settings.transfer_poll_interval_seconds > 0:
+    _beat_schedule["poll-published-transfers"] = {
+        "task": "app.tasks.claims.poll_all_transfers",
+        "schedule": float(settings.transfer_poll_interval_seconds),
+    }
+if settings.reconcile_interval_seconds > 0:
+    _beat_schedule["reconcile-claimed-events"] = {
+        "task": "app.tasks.claims.reconcile_all",
+        "schedule": float(settings.reconcile_interval_seconds),
+    }
+celery_app.conf.beat_schedule = _beat_schedule
+
 
 def _mark_job_failed(job_id: str, message: str) -> None:
     from app.db.models import IngestJob

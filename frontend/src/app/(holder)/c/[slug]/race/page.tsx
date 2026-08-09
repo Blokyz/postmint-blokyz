@@ -21,7 +21,9 @@ import { InfoTip } from "@/components/InfoTip";
 const display = displayFont;
 const mono = bodyFont;
 
-const REFRESH_MS = 15000;
+// 30s: countdowns tick locally (1s ticker), so the visible clock is unaffected;
+// this only paces the /race-state refetch. Halves race-page load vs the old 15s.
+const REFRESH_MS = 30000;
 const CLAIM_CHAIN = 84532; // Base Sepolia — the chain seasons deploy on (podium tx links)
 // The backend verifies the claim tx on-chain; its RPC can briefly lag behind the
 // wallet's, so a freshly-mined tx may not be visible yet (409 retryable). Retry a
@@ -79,7 +81,10 @@ type Leaderboard = {
   window_seconds: number;
   slots_filled: number;
   slots_remaining: number;
-  winners: Winner[];
+  winners: Winner[]; // capped at 5 (the podium) by /race-state
+  // This wallet's own won slots, computed server-side before the winners cap so
+  // a win outside the top 5 is never dropped.
+  my_wins?: Winner[];
   // Wallets currently holding the qualifying set (every one is racing by
   // definition — windows derive from acquisition history).
   racers: { wallet_address: string; held_count: number; status: string }[];
@@ -189,21 +194,12 @@ export default function RacePage() {
       setLoading(true);
       setError(null);
       try {
-        const eRes = await fetch(`${API_URL}/eligibility/${contract}/${wal}`);
-        if (!eRes.ok) {
-          const body = await eRes.json().catch(() => null);
-          throw new Error(body?.detail ?? `No race for this collection (${eRes.status})`);
+        const res = await fetch(`${API_URL}/race-state/${contract}/${wal}`);
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          throw new Error(body?.detail ?? `No race for this collection (${res.status})`);
         }
-        const elig: { tiers: Eligibility[] } = await eRes.json();
-        const details = await Promise.all(
-          elig.tiers.map(async (t) => {
-            const [ws, lb] = await Promise.all([
-              fetch(`${API_URL}/claim/status/${contract}/${encodeURIComponent(t.tier)}/${wal}`).then((r) => r.json()),
-              fetch(`${API_URL}/leaderboard/${contract}/${encodeURIComponent(t.tier)}`).then((r) => r.json()),
-            ]);
-            return { elig: t, ws, lb } as Lane;
-          }),
-        );
+        const { lanes: details }: { lanes: Lane[] } = await res.json();
         loadedAt.current = Date.now();
         setLanes(details);
         // Windows run automatically now (no opt-in click), so ask for
@@ -566,10 +562,13 @@ function Lane({
   const accent = TIER_ACCENT[elig.tier] ?? "#8b93a0";
   const full = lb.slots_remaining <= 0;
 
-  // Slots this wallet already secured in the tier (from the winners board).
-  const myWins = myWallet
-    ? lb.winners.filter((w) => w.wallet_address?.toLowerCase() === myWallet.toLowerCase())
-    : [];
+  // Slots this wallet already secured in the tier. /race-state provides my_wins
+  // (computed before the winners cap); fall back to filtering for older payloads.
+  const myWins =
+    lb.my_wins ??
+    (myWallet
+      ? lb.winners.filter((w) => w.wallet_address?.toLowerCase() === myWallet.toLowerCase())
+      : []);
   const winLabel = myWins.map((w) => (w.slot_number != null ? `P${w.slot_number}` : "—")).join(", ");
 
   // Live countdown: seconds_remaining captured at load, minus elapsed since.

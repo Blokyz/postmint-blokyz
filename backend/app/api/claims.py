@@ -152,25 +152,22 @@ def driver(contract: str, wallet: str, db: Session = Depends(get_db)) -> dict:
     return out
 
 
-@router.get("/leaderboard/{contract}/{tier}")
-def leaderboard(
+def _tier_leaderboard(
+    db: Session,
     contract: str,
     tier: str,
-    db: Session = Depends(get_db),
-    racers_limit: int = Query(100, ge=1, le=500),
-    racers_offset: int = Query(0, ge=0),
+    manifest: dict,
+    entry: dict,
+    *,
+    winners_limit: int | None = None,
+    racers_limit: int = 100,
+    racers_offset: int = 0,
+    wallet: str | None = None,
 ) -> dict:
-    """Winners (won slots) and racers in a tier. Racers = wallets currently
-    holding the qualifying set (windows are derived, so every qualified wallet
-    is racing by definition). Per-wallet ready/racing is NOT computed here —
-    that would need each racer's acquisition history; `/claim/status` answers it
-    for one wallet. Winners are bounded by the tier cap; racers page in-memory
-    over the qualified aggregate."""
-    manifest = _require_manifest(contract)
-    entry = find_tier_entry(manifest, tier)
-    if entry is None:
-        raise HTTPException(status_code=404, detail=f"Tier {tier!r} not in atlas manifest.")
-
+    """Winners + racers payload for one tier (shared by /leaderboard and the
+    batched /race-state). `winners_limit` caps the returned winners list (fill
+    counts stay total); `wallet` adds `my_wins` — that wallet's own slots
+    computed BEFORE the cap, so a win outside the top-N is never dropped."""
     window_seconds = tier_window_seconds(manifest, tier)
     cap = int((manifest.get("tier_structure", {}).get(tier, {}) or {}).get("cap", 0))
 
@@ -193,6 +190,15 @@ def leaderboard(
     ]
     winners.sort(key=lambda w: (w["slot_number"] is None, w["slot_number"]))
 
+    my_wins = None
+    if wallet is not None:
+        wl = wallet.lower()
+        my_wins = [w for w in winners if (w["wallet_address"] or "").lower() == wl]
+
+    slots_filled = len(winners)
+    if winners_limit is not None:
+        winners = winners[:winners_limit]
+
     qualified = qualified_wallets(db, contract, entry)
     ranked = sorted(qualified.items(), key=lambda t: (-t[1], t[0]))
     racers = [
@@ -200,17 +206,64 @@ def leaderboard(
         for w, c in ranked[racers_offset : racers_offset + racers_limit]
     ]
 
-    return {
+    out = {
         "contract_address": contract.lower(),
         "tier": tier,
         "cap": cap,
         "window_seconds": window_seconds,
-        "slots_filled": len(winners),
-        "slots_remaining": max(0, cap - len(winners)),
+        "slots_filled": slots_filled,
+        "slots_remaining": max(0, cap - slots_filled),
         "winners": winners,
         "racers": racers,
         "total_racers": len(qualified),
     }
+    if my_wins is not None:
+        out["my_wins"] = my_wins
+    return out
+
+
+@router.get("/leaderboard/{contract}/{tier}")
+def leaderboard(
+    contract: str,
+    tier: str,
+    db: Session = Depends(get_db),
+    racers_limit: int = Query(100, ge=1, le=500),
+    racers_offset: int = Query(0, ge=0),
+) -> dict:
+    """Winners (won slots) and racers in a tier. Racers = wallets currently
+    holding the qualifying set (windows are derived, so every qualified wallet
+    is racing by definition). Per-wallet ready/racing is NOT computed here —
+    that would need each racer's acquisition history; `/claim/status` answers it
+    for one wallet. Winners are bounded by the tier cap; racers page in-memory
+    over the qualified aggregate."""
+    manifest = _require_manifest(contract)
+    entry = find_tier_entry(manifest, tier)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Tier {tier!r} not in atlas manifest.")
+    return _tier_leaderboard(
+        db, contract, tier, manifest, entry,
+        racers_limit=racers_limit, racers_offset=racers_offset,
+    )
+
+
+@router.get("/race-state/{contract}/{wallet}")
+def race_state(contract: str, wallet: str, db: Session = Depends(get_db)) -> dict:
+    """Batched race-page snapshot: eligibility + derived window status + a capped
+    leaderboard for every tier, in one call (replaces the race page's ~11
+    per-refresh requests). Winners are capped at 5 (the podium) plus the wallet's
+    own wins; may lazily backfill acquisition timestamps like /claim/status."""
+    manifest = _require_manifest(contract)
+    chain = _collection_chain(db, contract)
+    lanes = []
+    for elig in evaluate_wallet(db, contract, wallet, manifest):
+        entry = find_tier_entry(manifest, elig.tier)
+        ws = window_status(db, contract, elig.tier, wallet, manifest, chain=chain)
+        lb = _tier_leaderboard(
+            db, contract, elig.tier, manifest, entry, winners_limit=5, wallet=wallet
+        )
+        lanes.append({"elig": elig.to_dict(), "ws": ws, "lb": lb})
+    db.commit()  # persist any lazy acquired_at backfill from window_status
+    return {"contract_address": contract.lower(), "wallet_address": wallet.lower(), "lanes": lanes}
 
 
 # --- Window status (derived from acquisition history — no opt-in/submit) ---

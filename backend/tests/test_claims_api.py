@@ -481,6 +481,51 @@ def test_winners_and_leaderboard(client, db, atlas_file, mock_chain):
     assert body["racers"] == [{"wallet_address": WALLET, "held_count": 2, "status": "qualified"}]
 
 
+def test_race_state_batches_lanes(client, db, atlas_file, mock_chain):
+    """One /race-state call returns per-tier elig + derived window + leaderboard,
+    with winners capped and the wallet's own wins surfaced separately."""
+    atlas_file(window_hours=24, cap=3)
+    _seed_holdings(db, 2)  # long-held set -> ready
+
+    r = client.get(f"/race-state/{CONTRACT}/{WALLET}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["wallet_address"] == WALLET
+    assert len(body["lanes"]) == 1
+    lane = body["lanes"][0]
+    assert lane["elig"]["tier"] == TIER
+    assert lane["elig"]["qualifies"] is True
+    assert lane["ws"]["status"] == "ready"  # derived from acquisition history
+    assert lane["lb"]["cap"] == 3
+    assert lane["lb"]["my_wins"] == []  # nothing won yet
+
+
+def test_race_state_my_wins_survives_winner_cap(client, db, atlas_file):
+    """my_wins is computed before the 5-winner cap, so a wallet's win outside
+    the podium is still reported."""
+    atlas_file(window_hours=24, cap=10)
+    # 6 other winners in slots 1-6 (fill the podium), then WALLET in slot 7.
+    for i in range(6):
+        db.add(
+            Claim(
+                contract_address=CONTRACT, tier=TIER, wallet_address=f"0x{i:040x}",
+                qualifying_tokens=[100 + i], on_chain_tx_hash=f"0x{i:064x}", slot_number=i + 1,
+            )
+        )
+    db.add(
+        Claim(
+            contract_address=CONTRACT, tier=TIER, wallet_address=WALLET,
+            qualifying_tokens=[7], on_chain_tx_hash="0x" + "cd" * 32, slot_number=7,
+        )
+    )
+    db.commit()
+
+    lane = client.get(f"/race-state/{CONTRACT}/{WALLET}").json()["lanes"][0]
+    assert len(lane["lb"]["winners"]) == 5  # podium capped
+    assert lane["lb"]["slots_filled"] == 7  # count is total, not the cap
+    assert [w["slot_number"] for w in lane["lb"]["my_wins"]] == [7]
+
+
 def test_leaderboard_404_unknown_tier(client, db, atlas_file):
     atlas_file()
     r = client.get(f"/leaderboard/{CONTRACT}/Nope")

@@ -55,7 +55,6 @@ export default function PublishPage() {
   const [displayName, setDisplayName] = useState("");
   const [slug, setSlug] = useState("");
   const [slugTouched, setSlugTouched] = useState(false);
-  const [imageUrl, setImageUrl] = useState("");
   const [published, setPublished] = useState(true);
 
   const [avail, setAvail] = useState<Avail>("idle");
@@ -77,7 +76,6 @@ export default function PublishPage() {
         setDisplayName(found.display_name);
         setSlug(found.slug);
         setSlugTouched(true);
-        setImageUrl(found.image_url ?? "");
         setPublished(found.published);
       }
       setGate(hasAtlas || found ? "ready" : "no-atlas");
@@ -166,7 +164,6 @@ export default function PublishPage() {
         display_name: name,
         // Only send slug for a first publish — re-publish keeps the existing one.
         ...(existing ? {} : { slug }),
-        ...(imageUrl.trim() ? { image_url: imageUrl.trim() } : {}),
         published,
         ...auth,
       });
@@ -245,18 +242,6 @@ export default function PublishPage() {
                 {avail === "idle" && "Auto-suggested from the name — edit to customise."}
               </span>
             )}
-          </label>
-
-          <label className="pub-field">
-            <span className="pub-label">
-              Cover image URL <span className="pub-fixed">· optional</span>
-            </span>
-            <input
-              type="url"
-              value={imageUrl}
-              onChange={(e) => setImageUrl(e.target.value)}
-              placeholder="https://…"
-            />
           </label>
 
           <label className="pub-toggle">

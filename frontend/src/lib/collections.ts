@@ -25,7 +25,6 @@ export type PublishRequest = {
   contract_address: string;
   display_name: string;
   slug?: string;
-  image_url?: string;
   published?: boolean;
   // Operator authorization (only enforced when the backend allowlist is set).
   operator_address?: string;

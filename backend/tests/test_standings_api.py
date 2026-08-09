@@ -10,7 +10,7 @@ import pytest
 
 from app.claims.standings import championship_points
 from app.db.models import Claim, Token, Trait
-from app.manifests import OUTPUT_DIR, write_atlas_manifest
+from app.manifests import write_atlas_manifest
 
 CONTRACT = "0xbc4ca0eda7647a8ab7c2061c2e118a18a936bc46"
 WALLET = "0x00000000000000000000000000000000000000a1"
@@ -48,11 +48,7 @@ def _manifest():
 
 @pytest.fixture
 def atlas_file():
-    path = OUTPUT_DIR / f"{CONTRACT}_atlas_manifest.json"
     write_atlas_manifest(CONTRACT, _manifest())
-    yield
-    if path.exists():
-        path.unlink()
 
 
 def _seed(db, count, wallet=WALLET, acquired_at=LONG_AGO):

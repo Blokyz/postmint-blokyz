@@ -4,18 +4,14 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from Crypto.Hash import keccak
 
 if TYPE_CHECKING:
     from app.scoring.market_premium import MarketPremiumResult
-
-OUTPUT_DIR = Path(__file__).parent.parent / "output"
 
 W_STAT = 0.5
 W_MARKET = 0.5
@@ -145,47 +141,58 @@ def blend_combined_score(
     return round(float(stat_norm), 6)
 
 
-def atomic_write_json(path: Path, manifest: dict) -> None:
-    """Write a manifest so readers never see a torn file.
-
-    Serializes to a uniquely-named temp file in the target directory, then
-    os.replace()s it onto *path* — atomic on POSIX and Windows (same volume).
-    A crash mid-write leaves the old manifest intact; concurrent writers
-    degrade to clean last-writer-wins instead of interleaved JSON.
-    """
-    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        tmp.write_text(json.dumps(manifest, indent=2))
-        os.replace(tmp, path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+# Manifests are stored in Postgres (table `manifests`, one row per
+# (contract, kind)), NOT on local disk: the API and the Celery worker are
+# separate processes/containers that must share one source of truth, and a
+# container filesystem is ephemeral (a deploy would wipe every approved/generated
+# manifest). The store opens its own short-lived session — a manifest write is a
+# self-contained side-write (as the old file write was), independent of the
+# caller's request transaction — so read/write signatures are unchanged.
 
 
-def write_ranking_manifest(contract_address: str, manifest: dict) -> Path:
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    path = OUTPUT_DIR / f"{contract_address}_ranking_manifest.json"
-    atomic_write_json(path, manifest)
-    return path
+def _save_manifest(contract_address: str, kind: str, manifest: dict) -> None:
+    from app.db.models import Manifest
+    from app.db.session import SessionLocal
+
+    contract = contract_address.lower()
+    with SessionLocal() as s:
+        row = s.get(Manifest, (contract, kind))
+        if row is None:
+            s.add(Manifest(contract_address=contract, kind=kind, data=manifest))
+        else:
+            row.data = manifest
+        s.commit()
 
 
-def write_atlas_manifest(contract_address: str, manifest: dict) -> Path:
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    path = OUTPUT_DIR / f"{contract_address}_atlas_manifest.json"
-    atomic_write_json(path, manifest)
-    return path
+def _load_manifest(contract_address: str, kind: str) -> dict | None:
+    from app.db.models import Manifest
+    from app.db.session import SessionLocal
+
+    with SessionLocal() as s:
+        row = s.get(Manifest, (contract_address.lower(), kind))
+        return dict(row.data) if row else None
 
 
-def atlas_manifest_path(contract_address: str) -> Path:
-    return OUTPUT_DIR / f"{contract_address.lower()}_atlas_manifest.json"
+def write_ranking_manifest(contract_address: str, manifest: dict) -> str:
+    """Persist the ranking manifest. Returns a stable marker (stored on the
+    ingest job's `manifest_path` column as a "manifest produced" flag)."""
+    _save_manifest(contract_address, "ranking", manifest)
+    return f"db://{contract_address.lower()}/ranking"
+
+
+def write_atlas_manifest(contract_address: str, manifest: dict) -> str:
+    _save_manifest(contract_address, "atlas", manifest)
+    return f"db://{contract_address.lower()}/atlas"
+
+
+def load_ranking_manifest(contract_address: str) -> dict | None:
+    """Read the approved/scored ranking manifest, or None if not ingested yet."""
+    return _load_manifest(contract_address, "ranking")
 
 
 def load_atlas_manifest(contract_address: str) -> dict | None:
     """Read a generated atlas manifest, or None if it hasn't been generated yet."""
-    path = atlas_manifest_path(contract_address)
-    if not path.exists():
-        return None
-    return json.loads(path.read_text())
+    return _load_manifest(contract_address, "atlas")
 
 
 def _canonical_number(value: int | float) -> str:

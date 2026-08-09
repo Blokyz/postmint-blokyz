@@ -1,6 +1,5 @@
 """Tests for the Set Atlas generator (backend/app/atlas/) and /atlas API routes."""
 
-import json
 import uuid
 
 import pytest
@@ -10,7 +9,7 @@ from app.atlas.generator import DEFAULT_TIER_STRUCTURE, TIER_OUTPUT_ORDER
 from app.atlas.pools import pool_token_count, wallet_counts_for_pool, wallet_owners_for_trait
 from app.atlas.rules import build_tier, detect_ladders, feasibility
 from app.db.models import IngestJob, Token, Trait
-from app.manifests import OUTPUT_DIR
+from app.manifests import load_atlas_manifest, write_ranking_manifest
 
 _CONTRACT = "0xbc4ca0eda7647a8ab7c2061c2e118a18a936f99e"
 
@@ -269,16 +268,6 @@ def test_detect_ladders_detects_overlap():
 
 # ── /atlas API ─────────────────────────────────────────────────────────────────
 
-@pytest.fixture
-def cleanup_atlas_file():
-    path = OUTPUT_DIR / f"{_CONTRACT}_atlas_manifest.json"
-    if path.exists():
-        path.unlink()
-    yield
-    if path.exists():
-        path.unlink()
-
-
 def _ranking_manifest(n_traits: int, approved: bool) -> dict:
     return {
         "manifest_id": str(uuid.uuid4()),
@@ -306,11 +295,10 @@ def _ranking_manifest(n_traits: int, approved: bool) -> dict:
 
 def _seed_ranking_job(db, tmp_path, n_traits: int, approved: bool) -> dict:
     manifest = _ranking_manifest(n_traits, approved)
-    manifest_file = tmp_path / "ranking.json"
-    manifest_file.write_text(json.dumps(manifest))
+    marker = write_ranking_manifest(_CONTRACT, manifest)
     db.add(IngestJob(
         id=str(uuid.uuid4()), contract_address=_CONTRACT, chain="eth",
-        status="complete", manifest_path=str(manifest_file),
+        status="complete", manifest_path=marker,
     ))
     db.commit()
     return manifest
@@ -337,12 +325,12 @@ def test_atlas_generate_requires_approval(client, db, tmp_path):
     assert r.status_code == 400
 
 
-def test_atlas_preview_404_before_generate(client, cleanup_atlas_file):
+def test_atlas_preview_404_before_generate(client):
     r = client.get(f"/atlas/preview/{_CONTRACT}")
     assert r.status_code == 404
 
 
-def test_atlas_generate_and_preview(client, db, tmp_path, cleanup_atlas_file):
+def test_atlas_generate_and_preview(client, db, tmp_path):
     manifest = _seed_ranking_job(db, tmp_path, n_traits=20, approved=True)
     _seed_tokens(db, 20)
 
@@ -360,3 +348,8 @@ def test_atlas_generate_and_preview(client, db, tmp_path, cleanup_atlas_file):
     preview = client.get(f"/atlas/preview/{_CONTRACT}")
     assert preview.status_code == 200
     assert preview.json()["atlas_manifest_id"] == body["atlas_manifest_id"]
+
+    # Atlas persisted to the DB store (replaces the old OUTPUT_DIR file check).
+    stored = load_atlas_manifest(_CONTRACT)
+    assert stored is not None
+    assert stored["atlas_manifest_id"] == body["atlas_manifest_id"]

@@ -18,7 +18,7 @@ from eth_account import Account
 from app.api import claims as claims_mod
 from app.claim_signing import backend_signer_address, recover_claim_signer
 from app.db.models import Claim, Token, Trait
-from app.manifests import OUTPUT_DIR, write_atlas_manifest
+from app.manifests import write_atlas_manifest
 
 CONTRACT = "0xbc4ca0eda7647a8ab7c2061c2e118a18a936bc46"
 WALLET = "0x00000000000000000000000000000000000000a1"
@@ -50,16 +50,12 @@ def _manifest(window_hours=24, count_required=2, cap=500):
 
 @pytest.fixture
 def atlas_file():
-    """Write an atlas manifest and clean it up."""
-    path = OUTPUT_DIR / f"{CONTRACT}_atlas_manifest.json"
+    """Write an atlas manifest (cleaned up by the manifests-table truncate)."""
 
     def _write(**kw):
         write_atlas_manifest(CONTRACT, _manifest(**kw))
-        return path
 
-    yield _write
-    if path.exists():
-        path.unlink()
+    return _write
 
 
 def _seed_holdings(db, count, wallet=WALLET, acquired_at=LONG_AGO, start_id=1):

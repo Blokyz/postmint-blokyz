@@ -1,6 +1,3 @@
-import json
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -15,7 +12,12 @@ from app.atlas.generator import generate_atlas_manifest
 from app.config import get_settings
 from app.db.models import IngestJob
 from app.db.session import get_db
-from app.manifests import OUTPUT_DIR, compute_manifest_hash, write_atlas_manifest
+from app.manifests import (
+    compute_manifest_hash,
+    load_atlas_manifest,
+    load_ranking_manifest,
+    write_atlas_manifest,
+)
 
 router = APIRouter(prefix="/atlas", tags=["atlas"])
 settings = get_settings()
@@ -35,11 +37,9 @@ def generate(req: AtlasGenerateRequest, db: Session = Depends(get_db)) -> dict:
             detail="No completed ingestion found for this contract.",
         )
 
-    ranking_path = Path(job.manifest_path)
-    if not ranking_path.exists():
-        raise HTTPException(status_code=500, detail="Ranking manifest file missing from disk.")
-
-    ranking_manifest = json.loads(ranking_path.read_text())
+    ranking_manifest = load_ranking_manifest(req.contract_address)
+    if ranking_manifest is None:
+        raise HTTPException(status_code=500, detail="Ranking manifest missing from store.")
     if ranking_manifest.get("approval") is None:
         raise HTTPException(
             status_code=400,
@@ -60,10 +60,10 @@ def generate(req: AtlasGenerateRequest, db: Session = Depends(get_db)) -> dict:
 
 @router.get("/preview/{contract}")
 def preview(contract: str) -> dict:
-    path = OUTPUT_DIR / f"{contract.lower()}_atlas_manifest.json"
-    if not path.exists():
+    manifest = load_atlas_manifest(contract)
+    if manifest is None:
         raise HTTPException(status_code=404, detail="No atlas manifest found for this contract.")
-    return json.loads(path.read_text())
+    return manifest
 
 
 @router.post("/lock-attestation", response_model=LockAttestationResponse)
@@ -87,10 +87,9 @@ def lock_attestation(req: LockAttestationRequest, db: Session = Depends(get_db))
     )
     if not job or not job.manifest_path:
         raise HTTPException(status_code=404, detail="No completed ingestion found for this contract.")
-    ranking_path = Path(job.manifest_path)
-    if not ranking_path.exists():
-        raise HTTPException(status_code=500, detail="Ranking manifest file missing from disk.")
-    ranking_manifest = json.loads(ranking_path.read_text())
+    ranking_manifest = load_ranking_manifest(req.contract_address)
+    if ranking_manifest is None:
+        raise HTTPException(status_code=500, detail="Ranking manifest missing from store.")
     approval = ranking_manifest.get("approval")
     if approval is None:
         raise HTTPException(
@@ -100,13 +99,12 @@ def lock_attestation(req: LockAttestationRequest, db: Session = Depends(get_db))
     ranking_hash = approval["manifest_hash"]
 
     # Atlas manifest must have been generated.
-    atlas_path = OUTPUT_DIR / f"{req.contract_address}_atlas_manifest.json"
-    if not atlas_path.exists():
+    atlas_manifest = load_atlas_manifest(req.contract_address)
+    if atlas_manifest is None:
         raise HTTPException(
             status_code=400,
             detail="Atlas manifest must be generated before locking.",
         )
-    atlas_manifest = json.loads(atlas_path.read_text())
     atlas_hash = compute_manifest_hash(atlas_manifest)
 
     signature = sign_lock_attestation(

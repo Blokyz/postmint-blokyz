@@ -4,7 +4,7 @@ import pytest
 
 from app.collections_registry import SlugError, slugify, validate_slug
 from app.db.models import Collection, IngestJob
-from app.manifests import OUTPUT_DIR, write_atlas_manifest
+from app.manifests import write_atlas_manifest
 
 CONTRACT = "0xbc4ca0eda7647a8ab7c2061c2e118a18a936bc46"
 
@@ -96,7 +96,6 @@ def test_resolve_slug_and_404(client, db):
 
 def test_directory_summary_rollup(client, db):
     # An atlas manifest lets the summary roll up tiers/caps.
-    path = OUTPUT_DIR / f"{CONTRACT}_atlas_manifest.json"
     write_atlas_manifest(
         CONTRACT,
         {
@@ -107,19 +106,15 @@ def test_directory_summary_rollup(client, db):
             ],
         },
     )
-    try:
-        _publish(client, slug="gvc")
-        rows = client.get("/collections").json()
-        assert len(rows) == 1
-        s = rows[0]
-        assert s["slug"] == "gvc"
-        assert s["tier_count"] == 2
-        assert s["total_cap"] == 550
-        assert s["total_filled"] == 0
-        assert s["status"] == "live"
-    finally:
-        if path.exists():
-            path.unlink()
+    _publish(client, slug="gvc")
+    rows = client.get("/collections").json()
+    assert len(rows) == 1
+    s = rows[0]
+    assert s["slug"] == "gvc"
+    assert s["tier_count"] == 2
+    assert s["total_cap"] == 550
+    assert s["total_filled"] == 0
+    assert s["status"] == "live"
 
 
 def test_directory_summary_with_recorded_wins(client, db):
@@ -128,7 +123,6 @@ def test_directory_summary_with_recorded_wins(client, db):
     the derived-window rework — no prior test had a win in the directory."""
     from app.db.models import Claim, Token, Trait
 
-    path = OUTPUT_DIR / f"{CONTRACT}_atlas_manifest.json"
     write_atlas_manifest(
         CONTRACT,
         {
@@ -145,30 +139,26 @@ def test_directory_summary_with_recorded_wins(client, db):
             ],
         },
     )
-    try:
-        wallet = "0x00000000000000000000000000000000000000a1"
-        db.add(Token(contract_address=CONTRACT, token_id=1, owner_address=wallet))
-        db.add(Trait(contract_address=CONTRACT, token_id=1, trait_category="Hat", trait_value="Gold"))
-        db.add(
-            Claim(
-                contract_address=CONTRACT,
-                tier="Rare",
-                wallet_address=wallet,
-                on_chain_tx_hash="0x" + "ab" * 32,
-                slot_number=1,
-            )
+    wallet = "0x00000000000000000000000000000000000000a1"
+    db.add(Token(contract_address=CONTRACT, token_id=1, owner_address=wallet))
+    db.add(Trait(contract_address=CONTRACT, token_id=1, trait_category="Hat", trait_value="Gold"))
+    db.add(
+        Claim(
+            contract_address=CONTRACT,
+            tier="Rare",
+            wallet_address=wallet,
+            on_chain_tx_hash="0x" + "ab" * 32,
+            slot_number=1,
         )
-        db.commit()
-        _publish(client, slug="gvc")
+    )
+    db.commit()
+    _publish(client, slug="gvc")
 
-        r = client.get("/collections")
-        assert r.status_code == 200, r.text
-        s = r.json()[0]
-        assert s["total_filled"] == 1
-        assert s["racers"] == 1  # the wallet still holds the qualifying set
-    finally:
-        if path.exists():
-            path.unlink()
+    r = client.get("/collections")
+    assert r.status_code == 200, r.text
+    s = r.json()[0]
+    assert s["total_filled"] == 1
+    assert s["racers"] == 1  # the wallet still holds the qualifying set
 
 
 def test_directory_hides_unpublished_by_default(client, db):

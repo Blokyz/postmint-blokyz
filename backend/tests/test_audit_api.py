@@ -1,19 +1,20 @@
 """Integration tests for the /audit API routes — require a live postmint_test DB."""
 
-import json
 import time
 import uuid
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from eth_account import Account
 from eth_account.messages import encode_defunct
-from sqlalchemy import select
 
 from app.config import get_settings
 from app.db.models import IngestJob
-from app.manifests import compute_manifest_hash
+from app.manifests import (
+    compute_manifest_hash,
+    load_ranking_manifest,
+    write_ranking_manifest,
+)
 from app.signing import build_approval_message, build_ingest_message
 
 _CONTRACT = "0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d"
@@ -278,19 +279,20 @@ def test_ranking_pending_job_returns_404(client, db):
     assert r.status_code == 404
 
 
-def test_ranking_complete_job_returns_manifest(client, db, tmp_path):
+def test_ranking_complete_job_returns_manifest(client, db):
     manifest = {"manifest_id": "test-id", "trait_rankings": []}
-    manifest_file = tmp_path / "manifest.json"
-    manifest_file.write_text(json.dumps(manifest))
+    marker = write_ranking_manifest(_CONTRACT, manifest)
 
-    _add_job(db, status="complete", manifest_path=str(manifest_file))
+    _add_job(db, status="complete", manifest_path=marker)
     r = client.get(f"/audit/ranking/{_CONTRACT}")
     assert r.status_code == 200
     assert r.json()["manifest_id"] == "test-id"
 
 
-def test_ranking_missing_manifest_file_returns_500(client, db):
-    _add_job(db, status="complete", manifest_path="/nonexistent/path/manifest.json")
+def test_ranking_missing_manifest_from_store_returns_500(client, db):
+    # A manifest marker exists on the job but no row was stored → the endpoint's
+    # load_ranking_manifest returns None → 500.
+    _add_job(db, status="complete", manifest_path="db://missing/ranking")
     r = client.get(f"/audit/ranking/{_CONTRACT}")
     assert r.status_code == 500
 
@@ -336,20 +338,14 @@ def _manifest_with_traits(traits=_TRAITS) -> dict:
     }
 
 
-def _add_approvable_job(db, tmp_path, traits=_TRAITS, manifest=None):
+def _add_approvable_job(db, tmp_path=None, traits=_TRAITS, manifest=None):
     manifest = manifest if manifest is not None else _manifest_with_traits(traits)
-    manifest_file = tmp_path / "manifest.json"
-    manifest_file.write_text(json.dumps(manifest))
-    return _add_job(db, status="complete", manifest_path=str(manifest_file)), manifest_file
+    marker = write_ranking_manifest(_CONTRACT, manifest)
+    return _add_job(db, status="complete", manifest_path=marker), manifest
 
 
 def _load_manifest(db, contract=_CONTRACT) -> dict:
-    job = db.scalar(
-        select(IngestJob)
-        .where(IngestJob.contract_address == contract)
-        .order_by(IngestJob.created_at.desc())
-    )
-    return json.loads(Path(job.manifest_path).read_text())
+    return load_ranking_manifest(contract)
 
 
 def _approve_payload(
@@ -406,7 +402,7 @@ def test_approve_hash_is_reproducible_from_published_manifest(client, db, tmp_pa
     assert r.status_code == 200
     manifest_hash = r.json()["manifest_hash"]
 
-    published = json.loads(client.get(f"/audit/ranking/{_CONTRACT}").text)
+    published = client.get(f"/audit/ranking/{_CONTRACT}").json()
     assert compute_manifest_hash(published) == manifest_hash
 
 

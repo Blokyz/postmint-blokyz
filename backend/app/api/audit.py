@@ -1,7 +1,5 @@
-import json
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -19,7 +17,12 @@ from app.api.auth import assert_operator
 from app.config import get_settings
 from app.db.models import IngestJob
 from app.db.session import get_db
-from app.manifests import atomic_write_json, blend_combined_score, compute_manifest_hash
+from app.manifests import (
+    blend_combined_score,
+    compute_manifest_hash,
+    load_ranking_manifest,
+    write_ranking_manifest,
+)
 from app.signing import recover_approval_signer, recover_ingest_signer
 from app.tasks.ingest import run_ingest
 
@@ -151,11 +154,10 @@ def ranking(contract: str, db: Session = Depends(get_db)) -> dict:
     if not job.manifest_path:
         raise HTTPException(status_code=500, detail="Manifest path missing on completed job.")
 
-    path = Path(job.manifest_path)
-    if not path.exists():
-        raise HTTPException(status_code=500, detail="Manifest file missing from disk.")
-
-    return json.loads(path.read_text())
+    manifest = load_ranking_manifest(contract)
+    if manifest is None:
+        raise HTTPException(status_code=500, detail="Manifest missing from store.")
+    return manifest
 
 
 @router.post("/approve", response_model=ApproveResponse)
@@ -172,9 +174,9 @@ def approve(req: ApproveRequest, db: Session = Depends(get_db)) -> ApproveRespon
             detail="No completed ingestion found for this contract.",
         )
 
-    path = Path(job.manifest_path)
-    if not path.exists():
-        raise HTTPException(status_code=500, detail="Manifest file missing from disk.")
+    manifest = load_ranking_manifest(req.contract_address)
+    if manifest is None:
+        raise HTTPException(status_code=500, detail="Manifest missing from store.")
 
     # Authenticate the approver: they must have wallet-signed the exact ordered
     # ranking (incl. pinned flags) being submitted. Recovers the signer from the
@@ -197,7 +199,6 @@ def approve(req: ApproveRequest, db: Session = Depends(get_db)) -> ApproveRespon
     # until `operator_allowlist` is configured — see app.api.auth).
     assert_operator(signer)
 
-    manifest = json.loads(path.read_text())
     existing = {(r["trait_category"], r["trait_value"]): r for r in manifest["trait_rankings"]}
     submitted = [(t.trait_category, t.trait_value) for t in req.trait_rankings]
 
@@ -234,7 +235,7 @@ def approve(req: ApproveRequest, db: Session = Depends(get_db)) -> ApproveRespon
         "manifest_hash": manifest_hash,
     }
 
-    atomic_write_json(path, manifest)
+    write_ranking_manifest(req.contract_address, manifest)
 
     return ApproveResponse(
         contract_address=req.contract_address,

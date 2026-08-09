@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import ARRAY, BigInteger, Boolean, DateTime, Index, Integer, Numeric, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -186,3 +187,20 @@ class ClaimNonce(Base):
     manager_address: Mapped[str] = mapped_column(Text, nullable=False)
     expiry: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Manifest(Base):
+    """Ranking + atlas manifests, stored in the DB instead of on local disk so the
+    API and Celery worker share one source of truth and manifests survive a
+    deploy (Render/containers have an ephemeral filesystem). One row per
+    (contract, kind); `kind` is 'ranking' or 'atlas'. The JSON body is the exact
+    manifest dict — the on-chain-locked hash is computed over it unchanged."""
+
+    __tablename__ = "manifests"
+
+    contract_address: Mapped[str] = mapped_column(Text, primary_key=True)
+    kind: Mapped[str] = mapped_column(Text, primary_key=True)  # 'ranking' | 'atlas'
+    data: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

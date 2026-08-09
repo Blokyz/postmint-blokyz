@@ -6,7 +6,6 @@ The task uses SessionLocal() which points to postmint_test (set by conftest env 
 """
 
 import uuid
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -15,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.models import IngestJob, Trait, Token
 from app.ingestion.moralis_client import NftPage
+from app.manifests import load_ranking_manifest
 from app.tasks.ingest import run_ingest
 
 _EMPTY_PAGE = NftPage(tokens=[], traits=[], next_cursor=None, total=0)
@@ -84,10 +84,7 @@ def _verify_session(test_engine):
 
 # ── Happy path ─────────────────────────────────────────────────────────────────
 
-def test_run_ingest_sets_status_complete(db, test_engine, tmp_path, monkeypatch):
-    import app.manifests as manifests_mod
-    monkeypatch.setattr(manifests_mod, "OUTPUT_DIR", tmp_path)
-
+def test_run_ingest_sets_status_complete(db, test_engine):
     job = _make_job(db)
 
     with patch("app.tasks.ingest.fetch_nft_page", side_effect=[_PAGE_1, _PAGE_2]):
@@ -100,10 +97,7 @@ def test_run_ingest_sets_status_complete(db, test_engine, tmp_path, monkeypatch)
     vs.close()
 
 
-def test_run_ingest_persists_all_tokens(db, test_engine, tmp_path, monkeypatch):
-    import app.manifests as manifests_mod
-    monkeypatch.setattr(manifests_mod, "OUTPUT_DIR", tmp_path)
-
+def test_run_ingest_persists_all_tokens(db, test_engine):
     job = _make_job(db)
 
     with patch("app.tasks.ingest.fetch_nft_page", side_effect=[_PAGE_1, _PAGE_2]):
@@ -117,10 +111,7 @@ def test_run_ingest_persists_all_tokens(db, test_engine, tmp_path, monkeypatch):
     vs.close()
 
 
-def test_run_ingest_persists_all_traits(db, test_engine, tmp_path, monkeypatch):
-    import app.manifests as manifests_mod
-    monkeypatch.setattr(manifests_mod, "OUTPUT_DIR", tmp_path)
-
+def test_run_ingest_persists_all_traits(db, test_engine):
     job = _make_job(db)
 
     with patch("app.tasks.ingest.fetch_nft_page", side_effect=[_PAGE_1, _PAGE_2]):
@@ -134,39 +125,27 @@ def test_run_ingest_persists_all_traits(db, test_engine, tmp_path, monkeypatch):
     vs.close()
 
 
-def test_run_ingest_writes_manifest_file(db, tmp_path, monkeypatch):
-    import app.manifests as manifests_mod
-    monkeypatch.setattr(manifests_mod, "OUTPUT_DIR", tmp_path)
-
+def test_run_ingest_writes_manifest(db):
     job = _make_job(db)
 
     with patch("app.tasks.ingest.fetch_nft_page", side_effect=[_PAGE_1, _PAGE_2]):
         run_ingest.apply(args=[job.id])
 
-    manifest_file = tmp_path / f"{_CONTRACT}_ranking_manifest.json"
-    assert manifest_file.exists()
+    assert load_ranking_manifest(_CONTRACT) is not None
 
 
-def test_run_ingest_manifest_has_all_traits(db, tmp_path, monkeypatch):
-    import app.manifests as manifests_mod
-    import json
-    monkeypatch.setattr(manifests_mod, "OUTPUT_DIR", tmp_path)
-
+def test_run_ingest_manifest_has_all_traits(db):
     job = _make_job(db)
 
     with patch("app.tasks.ingest.fetch_nft_page", side_effect=[_PAGE_1, _PAGE_2]):
         run_ingest.apply(args=[job.id])
 
-    manifest_file = tmp_path / f"{_CONTRACT}_ranking_manifest.json"
-    data = json.loads(manifest_file.read_text())
+    data = load_ranking_manifest(_CONTRACT)
     # 3 tokens all with "Fur" trait but different values → 3 distinct (category, value) pairs
     assert len(data["trait_rankings"]) == 3
 
 
-def test_run_ingest_stores_manifest_path(db, test_engine, tmp_path, monkeypatch):
-    import app.manifests as manifests_mod
-    monkeypatch.setattr(manifests_mod, "OUTPUT_DIR", tmp_path)
-
+def test_run_ingest_stores_manifest_path(db, test_engine):
     job = _make_job(db)
 
     with patch("app.tasks.ingest.fetch_nft_page", side_effect=[_PAGE_1, _PAGE_2]):
@@ -175,21 +154,17 @@ def test_run_ingest_stores_manifest_path(db, test_engine, tmp_path, monkeypatch)
     vs = _verify_session(test_engine)
     result = vs.get(IngestJob, job.id)
     assert result.manifest_path is not None
-    assert Path(result.manifest_path).exists()
+    assert result.manifest_path.startswith("db://")
     vs.close()
 
 
-def test_run_ingest_manifest_collection_fields(db, tmp_path, monkeypatch):
-    import app.manifests as manifests_mod
-    import json
-    monkeypatch.setattr(manifests_mod, "OUTPUT_DIR", tmp_path)
-
+def test_run_ingest_manifest_collection_fields(db):
     job = _make_job(db)
 
     with patch("app.tasks.ingest.fetch_nft_page", side_effect=[_PAGE_1, _PAGE_2]):
         run_ingest.apply(args=[job.id])
 
-    data = json.loads((tmp_path / f"{_CONTRACT}_ranking_manifest.json").read_text())
+    data = load_ranking_manifest(_CONTRACT)
     assert data["collection"]["contract_address"] == _CONTRACT
     assert data["collection"]["total_supply"] == 3
     assert data["collection"]["eligible_supply"] == 3
@@ -197,11 +172,8 @@ def test_run_ingest_manifest_collection_fields(db, tmp_path, monkeypatch):
 
 # ── Resume on crash (cursor) ───────────────────────────────────────────────────
 
-def test_run_ingest_resumes_from_cursor(db, tmp_path, monkeypatch):
+def test_run_ingest_resumes_from_cursor(db):
     """Task should pass stored cursor to first fetch_nft_page call."""
-    import app.manifests as manifests_mod
-    monkeypatch.setattr(manifests_mod, "OUTPUT_DIR", tmp_path)
-
     job = _make_job(db, cursor="saved-cursor")
 
     with patch("app.tasks.ingest.fetch_nft_page", side_effect=[_PAGE_2]) as mock_fetch:
@@ -213,17 +185,14 @@ def test_run_ingest_resumes_from_cursor(db, tmp_path, monkeypatch):
 
 # ── Missing job ────────────────────────────────────────────────────────────────
 
-def test_run_ingest_missing_job_does_not_raise(tmp_path):
+def test_run_ingest_missing_job_does_not_raise():
     """If job_id doesn't exist, the task should log and return without raising."""
     with patch("app.tasks.ingest.fetch_nft_page") as mock_fetch:
         run_ingest.apply(args=["nonexistent-job-id"])
     mock_fetch.assert_not_called()
 
 
-def test_run_ingest_empty_collection_marks_failed(db, test_engine, tmp_path, monkeypatch):
-    import app.manifests as manifests_mod
-
-    monkeypatch.setattr(manifests_mod, "OUTPUT_DIR", tmp_path)
+def test_run_ingest_empty_collection_marks_failed(db, test_engine):
     job = _make_job(db)
 
     with patch("app.tasks.ingest.fetch_nft_page", return_value=_EMPTY_PAGE):

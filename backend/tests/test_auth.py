@@ -6,9 +6,11 @@ These mutate the cached Settings via monkeypatch and restore it (autouse).
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 from app.api.auth import assert_operator, operator_gate_enabled, require_operator_token
 from app.config import get_settings
+from app.main import app
 
 OP = "0x00000000000000000000000000000000000000a1"
 OTHER = "0x00000000000000000000000000000000000000b2"
@@ -45,6 +47,19 @@ def test_allowlist_rejects_non_member():
     with pytest.raises(HTTPException) as ei:
         assert_operator(OTHER)
     assert ei.value.status_code == 403
+
+
+def test_operator_check_open_when_unset():
+    _set(allowlist="")
+    with TestClient(app) as client:
+        assert client.get(f"/auth/operator/{OTHER}").json() == {"allowed": True}
+
+
+def test_operator_check_membership():
+    _set(allowlist=OP)
+    with TestClient(app) as client:
+        assert client.get(f"/auth/operator/{OP.upper()}").json() == {"allowed": True}
+        assert client.get(f"/auth/operator/{OTHER}").json() == {"allowed": False}
 
 
 def test_token_open_when_unset():

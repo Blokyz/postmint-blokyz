@@ -1,6 +1,7 @@
 "use client";
 
 import { displayFont, bodyFont } from "@/lib/fonts";
+import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -131,8 +132,21 @@ export default function TierPage() {
           const inner = (
             <>
               {src ? (
-                // eslint-disable-next-line @next/next/no-img-element -- arbitrary NFT hosts; next/image needs enumerated domains
-                <img src={src} alt={`#${tok.token_id}`} loading="lazy" />
+                src.startsWith("https://") ? (
+                  // Server-side optimizer: users get ~20KB cached thumbs
+                  // instead of multi-MB originals from IPFS/project hosts.
+                  <Image
+                    src={src}
+                    alt={`#${tok.token_id}`}
+                    width={400}
+                    height={400}
+                    sizes="(max-width: 640px) 45vw, 220px"
+                  />
+                ) : (
+                  // data:/http sources bypass the optimizer (it rejects them).
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={src} alt={`#${tok.token_id}`} loading="lazy" />
+                )
               ) : (
                 <span className="cb-tiergal-noimg">#{tok.token_id}</span>
               )}

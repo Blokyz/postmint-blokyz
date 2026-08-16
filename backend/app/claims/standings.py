@@ -29,7 +29,12 @@ from sqlalchemy.orm import Session
 
 from app.atlas.pools import wallet_counts_for_pool
 from app.claims.acquisitions import ensure_acquired_at, set_completed_at
-from app.claims.eligibility import consumed_token_ids, evaluate_wallet, tier_pool_pairs
+from app.claims.eligibility import (
+    consumed_token_ids,
+    evaluate_wallet,
+    tier_exclude_pairs,
+    tier_pool_pairs,
+)
 from app.claims.windows import derive_status, tier_window_seconds
 from app.db.models import Claim
 
@@ -68,7 +73,10 @@ def qualified_wallets(db: Session, contract: str, tier_entry: dict) -> dict[str,
     if not pool or required <= 0:
         return {}
     used = consumed_token_ids(db, contract.lower(), tier_entry.get("tier", ""))
-    counts = wallet_counts_for_pool(db, contract.lower(), pool, exclude_token_ids=used)
+    counts = wallet_counts_for_pool(
+        db, contract.lower(), pool, exclude_token_ids=used,
+        exclude_pool=tier_exclude_pairs(tier_entry),
+    )
     return {w: c for w, c in counts.items() if c >= required}
 
 

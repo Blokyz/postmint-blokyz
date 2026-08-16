@@ -353,3 +353,61 @@ def test_atlas_generate_and_preview(client, db, tmp_path):
     stored = load_atlas_manifest(_CONTRACT)
     assert stored is not None
     assert stored["atlas_manifest_id"] == body["atlas_manifest_id"]
+
+
+# -- exclusive tier bands (Option A, 2026-08-13) --
+
+
+def test_pool_helpers_exclude_pool(db):
+    # Token 1: Red only. Token 2: Red + rarer trait Laser. Same owner.
+    _add_token(db, 1, "0xA")
+    _add_trait(db, 1, "Background", "Red")
+    _add_token(db, 2, "0xA")
+    _add_trait(db, 2, "Background", "Red")
+    _add_trait(db, 2, "Eyes", "Laser")
+    db.commit()
+
+    pool = [("Background", "Red")]
+    exclude = [("Eyes", "Laser")]
+    assert pool_token_count(db, _CONTRACT, pool) == 2
+    assert pool_token_count(db, _CONTRACT, pool, exclude_pool=exclude) == 1
+    assert wallet_counts_for_pool(db, _CONTRACT, pool, exclude_pool=exclude) == {"0xA": 1}
+
+
+def test_build_tier_writes_pool_exclude_and_filters(db):
+    # Two wallets hold one Red token each; wallet B's also carries Laser (rarer).
+    _add_token(db, 1, "0xA")
+    _add_trait(db, 1, "Background", "Red")
+    _add_token(db, 2, "0xB")
+    _add_trait(db, 2, "Background", "Red")
+    _add_trait(db, 2, "Eyes", "Laser")
+    db.commit()
+
+    tier_traits = [{"trait_category": "Background", "trait_value": "Red"}]
+    exclude = [{"trait_category": "Eyes", "trait_value": "Laser"}]
+    entry = build_tier("Common", tier_traits, cap=1, db=db, contract=_CONTRACT,
+                       count_required=1, exclude_traits=exclude)
+    assert entry["set_rule"]["pool_exclude"] == exclude
+    assert entry["feasibility"]["pool_qualifying_nfts"] == 1
+    assert entry["feasibility"]["estimated_qualifiers"] == 1
+
+
+def test_generate_atlas_exclusive_bands(client, db, tmp_path):
+    _seed_ranking_job(db, tmp_path, n_traits=20, approved=True)
+    _seed_tokens(db, 20)
+
+    r = client.post("/atlas/generate", json={"contract_address": _CONTRACT})
+    assert r.status_code == 200
+    tiers = {t["tier"]: t for t in r.json()["tiers"]}
+
+    # Mythic (rarest) excludes nothing; every other tier excludes exactly the
+    # union of all rarer tiers' pools; Common excludes everything above it.
+    assert tiers["Mythic"]["set_rule"]["pool_exclude"] == []
+    pair = lambda d: (d["trait_category"], d["trait_value"])
+    for rarer_idx, tier in enumerate(reversed(TIER_OUTPUT_ORDER)):
+        rarer_tiers = list(reversed(TIER_OUTPUT_ORDER))[:rarer_idx]
+        expected = {pair(p) for rt in rarer_tiers for p in tiers[rt]["pool"]}
+        got = {pair(p) for p in tiers[tier]["set_rule"]["pool_exclude"]}
+        assert got == expected, tier
+    common_excl = tiers["Common"]["set_rule"]["pool_exclude"]
+    assert len(common_excl) == 20 - len(tiers["Common"]["pool"])

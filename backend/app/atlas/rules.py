@@ -86,20 +86,24 @@ def feasibility(pool_qty: int, estimated_qualifiers: int, cap: int, x: int) -> d
 
 
 def _select_count(
-    db: Session, contract: str, pool: Pool, cap: int, count_required: int
+    db: Session, contract: str, pool: Pool, cap: int, count_required: int,
+    exclude_pool: Pool | None = None,
 ) -> tuple[int, dict, bool]:
     """Feasibility for a fixed, operator-chosen set size (count_of_pool /
     apex_combo). `count_required` is a direct lever, not auto-searched. It is
     clamped to [1, pool_qty] so a tier can never demand more tokens than the band
     contains. `low_feasibility` is True when the resulting fit_score falls outside
     the healthy band — a signal to tune `cap` (or the count), not an auto-fix.
+    `exclude_pool` = rarer-band traits (exclusive bands): tokens carrying any of
+    them don't count for this tier, so feasibility matches what eligibility will
+    enforce from the manifest.
     """
-    pool_qty = pool_token_count(db, contract, pool)
+    pool_qty = pool_token_count(db, contract, pool, exclude_pool=exclude_pool)
     x = max(1, min(count_required, pool_qty)) if pool_qty else max(1, count_required)
     if pool_qty == 0:
         return x, feasibility(0, 0, cap, x), True
 
-    counts = wallet_counts_for_pool(db, contract, pool).values()
+    counts = wallet_counts_for_pool(db, contract, pool, exclude_pool=exclude_pool).values()
     estimated_qualifiers = sum(1 for c in counts if c >= x)
     feas = feasibility(pool_qty, estimated_qualifiers, cap, x)
     fit = feas["fit_score"]
@@ -154,10 +158,16 @@ def build_tier(
     db: Session,
     contract: str,
     count_required: int | None = None,
+    exclude_traits: list[dict] | None = None,
 ) -> dict:
     """Build the {tier, set_rule, pool, feasibility, low_feasibility} entry for one
     tier. `count_required` (the set size) defaults to the graduated
-    DEFAULT_COUNT_BY_TIER ramp when not supplied by the caller/operator."""
+    DEFAULT_COUNT_BY_TIER ramp when not supplied by the caller/operator.
+
+    `exclude_traits` = the traits of all RARER bands (exclusive tier bands,
+    Option A 2026-08-13): a token carrying any of them belongs to a rarer tier
+    and never counts here. Written into `set_rule.pool_exclude` so eligibility
+    stays manifest-driven; old manifests without the field keep old behavior."""
     pool: Pool = [(t["trait_category"], t["trait_value"]) for t in tier_traits]
     archetype = ARCHETYPE_BY_TIER[tier]
     if count_required is None:
@@ -172,14 +182,21 @@ def build_tier(
             "low_feasibility": True,
         }
 
+    exclude_pool: Pool = [
+        (t["trait_category"], t["trait_value"]) for t in exclude_traits or []
+    ]
+
     if archetype == "one_of_each":
         trait_values, feas, low = _select_one_of_each(db, contract, pool, cap)
         set_rule = {"archetype": archetype, "trait_values": _pairs_to_dicts(trait_values)}
     else:
-        resolved_count, feas, low = _select_count(db, contract, pool, cap, count_required)
+        resolved_count, feas, low = _select_count(
+            db, contract, pool, cap, count_required, exclude_pool=exclude_pool
+        )
         set_rule = {
             "archetype": archetype,
             "pool": _pairs_to_dicts(pool),
+            "pool_exclude": _pairs_to_dicts(exclude_pool),
             "count_required": resolved_count,
         }
 

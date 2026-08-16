@@ -12,10 +12,7 @@ from app.claims.eligibility import (
     evaluate_wallet,
     find_tier_entry,
     matching_token_ids,
-    pool_traits_with_rarity,
-    shopping_guidance_for_wallet,
     tier_progress,
-    unowned_candidate_tokens,
 )
 from app.db.models import Claim, Token, Trait
 
@@ -183,40 +180,6 @@ def test_evaluate_wallet_all_tiers(db):
     assert results[1].qualifies is False
 
 
-def test_unowned_candidate_tokens(db):
-    _seed(
-        db,
-        owner_map={1: WALLET, 2: OTHER, 3: OTHER},
-        token_traits={
-            1: [("Hat", "Gold")],
-            2: [("Hat", "Gold")],
-            3: [("Hat", "Silver")],
-        },
-    )
-    pool = [("Hat", "Gold"), ("Hat", "Silver")]
-    candidates = unowned_candidate_tokens(db, CONTRACT, WALLET, pool)
-    assert candidates == [2, 3]
-
-
-def test_pool_traits_with_rarity(db):
-    _seed(
-        db,
-        owner_map={1: WALLET, 2: OTHER, 3: OTHER},
-        token_traits={
-            1: [("Hat", "Gold")],
-            2: [("Hat", "Gold")],
-            3: [("Hat", "Silver")],
-        },
-    )
-    pool = [("Hat", "Silver"), ("Hat", "Gold")]
-    traits = pool_traits_with_rarity(db, CONTRACT, pool)
-    # Gold has 2 occurrences, Silver has 1 — Gold should be first
-    assert traits[0]["trait_value"] == "Gold"
-    assert traits[0]["token_count"] == 2
-    assert traits[1]["trait_value"] == "Silver"
-    assert traits[1]["token_count"] == 1
-
-
 # --- set consumption (2026-08-05): tokens behind a WON claim are spent per tier ---
 
 
@@ -295,35 +258,32 @@ def test_fresh_disjoint_set_qualifies_again(db):
     assert elig.qualifying_token_ids == [3, 4]  # only the unspent tokens
 
 
-def test_shopping_guidance_for_wallet(db):
+# --- exclusive tier bands (Option A, 2026-08-13): set_rule.pool_exclude ---
+
+
+def _count_tier_excl(pool, count_required, exclude, tier="Common"):
+    entry = _count_tier(pool, count_required, tier=tier)
+    entry["set_rule"]["pool_exclude"] = [
+        {"trait_category": c, "trait_value": v} for c, v in exclude
+    ]
+    return entry
+
+
+def test_exclusive_band_token_with_rarer_trait_does_not_count(db):
+    # Token 1: common trait only. Token 2: common trait + a rarer-band trait.
     _seed(
         db,
-        owner_map={1: WALLET, 2: OTHER, 3: OTHER},
-        token_traits={
-            1: [("Hat", "Gold")],
-            2: [("Hat", "Gold")],
-            3: [("Hat", "Gold"), ("Background", "Blue")],
-        },
+        {1: WALLET, 2: WALLET},
+        {1: [("Fur", "Brown")], 2: [("Fur", "Brown"), ("Eyes", "Laser")]},
     )
-    manifest = {
-        "tiers": [
-            _count_tier([("Hat", "Gold")], 1, tier="Common"),
-            _count_tier([("Hat", "Gold")], 3, tier="Super Rare"),
-            _count_tier([("Hat", "Gold"), ("Background", "Blue")], 3, tier="Mythic"),
-        ]
-    }
-    guidance = shopping_guidance_for_wallet(db, CONTRACT, WALLET, manifest, chain="base")
-    assert guidance["chain"] == "base"
-    # Common is qualified (held 1, needed 0) so it shouldn't be in short_tiers
-    tier_names = [st["tier"] for st in guidance["short_tiers"]]
-    assert "Common" not in tier_names
-    assert "Super Rare" in tier_names
-    assert "Mythic" in tier_names
+    entry = _count_tier_excl([("Fur", "Brown")], 2, [("Eyes", "Laser")])
+    result = evaluate_tier(db, CONTRACT, WALLET, entry)
+    assert result.held_count == 1
+    assert result.qualifying_token_ids == [1]
+    assert not result.qualifies
 
-    sr = next(st for st in guidance["short_tiers"] if st["tier"] == "Super Rare")
-    assert sr["needed"] == 2
-    assert sr["candidate_token_ids"] == [2, 3]
-    # Check cross tier impact on Mythic
-    assert len(sr["cross_tier_impact"]) > 0
-    assert sr["cross_tier_impact"][0]["tier"] == "Mythic"
-
+    # Old manifest (no pool_exclude): both tokens count — old behavior kept.
+    old_entry = _count_tier([("Fur", "Brown")], 2)
+    old = evaluate_tier(db, CONTRACT, WALLET, old_entry)
+    assert old.held_count == 2
+    assert old.qualifies

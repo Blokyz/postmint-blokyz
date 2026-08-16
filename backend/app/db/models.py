@@ -19,6 +19,9 @@ class Token(Base):
     # backfill in claims/acquisitions.py. Must be cleared (not carried over) on
     # any ownership change whose transfer lacks a timestamp.
     acquired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Token artwork from ingest metadata (http(s)/ipfs/data URI). NULL = metadata
+    # had no image or the row predates migration 010 (re-ingest backfills).
+    image_url: Mapped[str | None] = mapped_column(Text)
 
 
 class Trait(Base):

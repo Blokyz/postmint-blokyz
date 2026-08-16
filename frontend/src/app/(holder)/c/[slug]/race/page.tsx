@@ -14,7 +14,7 @@ import { API_URL, apiPost, shortAddr } from "@/lib/api";
 import { useCollection } from "@/lib/collection";
 import { explorerTxUrl } from "@/lib/manifestRegistry";
 import { ClaimAttestation, SET_CLAIM_MANAGER_ABI, claimArgs } from "@/lib/setClaimManager";
-import { ShoppingPanel } from "@/components/ShoppingPanel";
+import Link from "next/link";
 import { ClaimConfirmModal } from "@/components/ClaimConfirmModal";
 import { InfoTip } from "@/components/InfoTip";
 
@@ -125,7 +125,7 @@ function humanizeError(e: unknown): string {
 }
 
 export default function RacePage() {
-  const { contract_address, display_name, chain } = useCollection();
+  const { contract_address, display_name, chain, slug } = useCollection();
   const contract = contract_address;
   const { address, isConnected } = useAccount();
   const wallet = address?.toLowerCase();
@@ -488,8 +488,7 @@ export default function RacePage() {
           {grid.map((lane, i) => (
             <Lane
               key={lane.elig.tier}
-              contract={contract}
-              chain={chain}
+              slug={slug}
               lane={lane}
               index={i}
               nowMs={Date.now()}
@@ -532,8 +531,7 @@ export default function RacePage() {
 }
 
 function Lane({
-  contract,
-  chain,
+  slug,
   lane,
   index,
   nowMs,
@@ -545,8 +543,7 @@ function Lane({
   myWallet,
   onClaim,
 }: {
-  contract: string;
-  chain?: string;
+  slug: string;
   lane: Lane;
   index: number;
   nowMs: number;
@@ -645,13 +642,16 @@ function Lane({
               </p>
             )}
             {!elig.qualifies && elig.needed > 0 && myWallet && (state !== "won" || !full) && (
-              <ShoppingPanel
-                contract={contract}
-                wallet={myWallet}
-                tier={elig.tier}
-                needed={elig.needed}
-                chain={chain ?? "eth"}
-              />
+              <p className="rc-need rc-tiers-hint">
+                Browse the qualifying NFTs for this tier under{" "}
+                <Link
+                  href={`/c/${slug}/tiers/${elig.tier.toLowerCase().replace(/\s+/g, "-")}`}
+                  className="rc-tiers-link"
+                >
+                  Standings → Tiers
+                </Link>
+                .
+              </p>
             )}
           </div>
 

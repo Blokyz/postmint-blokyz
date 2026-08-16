@@ -14,26 +14,69 @@ from app.db.models import Token, Trait
 Pool = list[tuple[str, str]]
 
 
-def pool_token_count(db: Session, contract: str, pool: Pool) -> int:
-    """Number of distinct tokens that have at least one trait in `pool`."""
+def excluded_token_ids_subq(contract: str, exclude_pool: Pool):
+    """Subquery of token ids carrying >=1 trait in `exclude_pool`.
+
+    Exclusive tier bands (Option A, 2026-08-13): a token belongs only to the
+    band of its RAREST trait, so band pools exclude any token that also carries
+    a trait from a rarer band. `exclude_pool` is that rarer-bands trait list
+    (the tier's `set_rule.pool_exclude`)."""
+    return (
+        select(Trait.token_id)
+        .where(Trait.contract_address == contract)
+        .where(tuple_(Trait.trait_category, Trait.trait_value).in_(exclude_pool))
+    )
+
+
+def pool_token_ids(
+    db: Session, contract: str, pool: Pool, exclude_pool: Pool | None = None
+) -> list[int]:
+    """Sorted distinct token ids with at least one trait in `pool` (and, when
+    `exclude_pool` is given, none in it) — the tier's full membership, used by
+    the public tier gallery."""
+    if not pool:
+        return []
+    stmt = (
+        select(Trait.token_id)
+        .distinct()
+        .where(Trait.contract_address == contract)
+        .where(tuple_(Trait.trait_category, Trait.trait_value).in_(pool))
+    )
+    if exclude_pool:
+        stmt = stmt.where(Trait.token_id.not_in(excluded_token_ids_subq(contract, exclude_pool)))
+    return sorted(r[0] for r in db.execute(stmt).all())
+
+
+def pool_token_count(
+    db: Session, contract: str, pool: Pool, exclude_pool: Pool | None = None
+) -> int:
+    """Number of distinct tokens that have at least one trait in `pool`
+    (and, when `exclude_pool` is given, no trait in it)."""
     if not pool:
         return 0
-    count = db.scalar(
+    stmt = (
         select(func.count(func.distinct(Trait.token_id)))
         .where(Trait.contract_address == contract)
         .where(tuple_(Trait.trait_category, Trait.trait_value).in_(pool))
     )
-    return count or 0
+    if exclude_pool:
+        stmt = stmt.where(Trait.token_id.not_in(excluded_token_ids_subq(contract, exclude_pool)))
+    return db.scalar(stmt) or 0
 
 
 def wallet_counts_for_pool(
-    db: Session, contract: str, pool: Pool, exclude_token_ids: set[int] | None = None
+    db: Session,
+    contract: str,
+    pool: Pool,
+    exclude_token_ids: set[int] | None = None,
+    exclude_pool: Pool | None = None,
 ) -> dict[str, int]:
     """Map wallet -> count of distinct tokens it holds with a trait in `pool`.
 
     `exclude_token_ids` drops specific tokens from the count — used by the race
     surfaces to ignore tokens already consumed by a won claim in the tier
-    (atlas feasibility passes nothing: it estimates the pre-season universe)."""
+    (atlas feasibility passes nothing: it estimates the pre-season universe).
+    `exclude_pool` drops tokens carrying any rarer-band trait (exclusive bands)."""
     if not pool:
         return {}
     stmt = (
@@ -49,6 +92,8 @@ def wallet_counts_for_pool(
     )
     if exclude_token_ids:
         stmt = stmt.where(Token.token_id.not_in(exclude_token_ids))
+    if exclude_pool:
+        stmt = stmt.where(Token.token_id.not_in(excluded_token_ids_subq(contract, exclude_pool)))
     rows = db.execute(stmt.group_by(Token.owner_address)).all()
     return {row[0]: row[1] for row in rows}
 

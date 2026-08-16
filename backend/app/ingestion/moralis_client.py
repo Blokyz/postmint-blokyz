@@ -177,18 +177,20 @@ def fetch_nft_page(
         owner = (item.get("owner_of") or "").lower() or None
         block = item.get("block_number")
 
-        tokens.append({
-            "contract_address": contract_lc,
-            "token_id": token_id,
-            "owner_address": owner,
-            "snapshot_block": int(block) if block else None,
-        })
-
         raw_meta = item.get("metadata")
         try:
             meta = json.loads(raw_meta) if isinstance(raw_meta, str) else (raw_meta or {})
         except (json.JSONDecodeError, TypeError):
             meta = {}
+
+        image = meta.get("image") or meta.get("image_url")
+        tokens.append({
+            "contract_address": contract_lc,
+            "token_id": token_id,
+            "owner_address": owner,
+            "snapshot_block": int(block) if block else None,
+            "image_url": str(image) if image else None,
+        })
         attributes = meta.get("attributes") or []
         for attr in attributes:
             category = (attr.get("trait_type") or "").strip().title()

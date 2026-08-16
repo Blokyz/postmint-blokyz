@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Chakra_Petch, JetBrains_Mono } from "next/font/google";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useAccount, useSignMessage } from "wagmi";
 import {
   DndContext,
@@ -64,6 +64,63 @@ function traitKey(t: { trait_category: string; trait_value: string }): string {
   return `${t.trait_category}::${t.trait_value}`;
 }
 
+// Atlas band preview — mirrors TIER_ORDER + CUMULATIVE_PCT in
+// backend/app/atlas/bands.py (keep in lockstep): the atlas slices THIS ranking
+// at ceil(n * pct) cumulative cuts, so a trait's list position decides its band.
+const TIER_ORDER = ["Mythic", "Super Rare", "Rare", "Uncommon", "Common"] as const;
+const CUMULATIVE_PCT: Record<string, number> = {
+  Mythic: 0.07,
+  "Super Rare": 0.15,
+  Rare: 0.3,
+  Uncommon: 0.5,
+  Common: 1.0,
+};
+const TIER_COLOR: Record<string, string> = {
+  Mythic: "#ffd23f",
+  "Super Rare": "#8b6df0",
+  Rare: "#2fc7c0",
+  Uncommon: "#4f9bd9",
+  Common: "#7c8aa3",
+};
+
+type Band = { tier: string; start: number; end: number }; // ranks [start+1, end]
+
+function computeBands(n: number): Band[] {
+  let prev = 0;
+  return TIER_ORDER.map((tier) => {
+    const end = Math.min(n, Math.ceil(n * CUMULATIVE_PCT[tier]));
+    const band = { tier, start: prev, end };
+    prev = end;
+    return band;
+  });
+}
+
+function bandForRank(rank: number, bands: Band[]): Band {
+  return bands.find((b) => rank <= b.end) ?? bands[bands.length - 1];
+}
+
+function BandChip({ tier }: { tier: string }) {
+  const color = TIER_COLOR[tier] ?? "#7c8aa3";
+  return (
+    <span className="al-band" style={{ "--band-color": color } as React.CSSProperties}>
+      {tier}
+    </span>
+  );
+}
+
+function BandDivider({ band }: { band: Band }) {
+  const color = TIER_COLOR[band.tier] ?? "#7c8aa3";
+  const pct = Math.round(CUMULATIVE_PCT[band.tier] * 100);
+  return (
+    <div className="al-band-divider" style={{ "--band-color": color } as React.CSSProperties}>
+      <span className="al-band-divider-name">{band.tier}</span>
+      <span className="al-band-divider-meta">
+        ranks {band.start + 1}–{band.end} · top {pct}% · {band.end - band.start} traits
+      </span>
+    </div>
+  );
+}
+
 /**
  * Canonical message the approver signs — MUST stay byte-for-byte in lockstep with
  * `build_approval_message` in backend/app/signing.py. The API recovers the signer
@@ -90,10 +147,12 @@ function buildApprovalMessage(
 
 function RowContent({
   trait,
+  band,
   onTogglePin,
   handle,
 }: {
   trait: TraitRanking;
+  band: string;
   onTogglePin: (key: string) => void;
   handle: React.ReactNode;
 }) {
@@ -103,6 +162,7 @@ function RowContent({
     <>
       {handle}
       <span className="al-rank">{String(trait.rank).padStart(2, "0")}</span>
+      <BandChip tier={band} />
       <div className="al-trait-main">
         <div className="al-trait-name">
           <span className="al-cat">{trait.trait_category}</span>
@@ -133,9 +193,11 @@ function RowContent({
 
 function SortableTraitRow({
   trait,
+  band,
   onTogglePin,
 }: {
   trait: TraitRanking;
+  band: string;
   onTogglePin: (key: string) => void;
 }) {
   const key = traitKey(trait);
@@ -152,16 +214,18 @@ function SortableTraitRow({
   );
   return (
     <div ref={setNodeRef} style={style} className={`al-row${trait.pinned ? " is-pinned" : ""}`}>
-      <RowContent trait={trait} onTogglePin={onTogglePin} handle={handle} />
+      <RowContent trait={trait} band={band} onTogglePin={onTogglePin} handle={handle} />
     </div>
   );
 }
 
 function StaticTraitRow({
   trait,
+  band,
   onTogglePin,
 }: {
   trait: TraitRanking;
+  band: string;
   onTogglePin: (key: string) => void;
 }) {
   const handle = (
@@ -171,17 +235,19 @@ function StaticTraitRow({
   );
   return (
     <div className={`al-row${trait.pinned ? " is-pinned" : ""}`}>
-      <RowContent trait={trait} onTogglePin={onTogglePin} handle={handle} />
+      <RowContent trait={trait} band={band} onTogglePin={onTogglePin} handle={handle} />
     </div>
   );
 }
 
 function TraitDndList({
   traits,
+  bands,
   onDragEnd,
   onTogglePin,
 }: {
   traits: TraitRanking[];
+  bands: Band[];
   onDragEnd: (event: DragEndEvent) => void;
   onTogglePin: (key: string) => void;
 }) {
@@ -189,14 +255,27 @@ function TraitDndList({
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
+  // Band divider before the first trait of each band (band starts are list
+  // indexes, and rank === index + 1 while unfiltered).
+  const startsAt = new Map(bands.filter((b) => b.end > b.start).map((b) => [b.start, b]));
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <SortableContext items={traits.map(traitKey)} strategy={verticalListSortingStrategy}>
         <div className="al-trait-list">
-          {traits.map((t) => (
-            <SortableTraitRow key={traitKey(t)} trait={t} onTogglePin={onTogglePin} />
-          ))}
+          {traits.map((t, i) => {
+            const divider = startsAt.get(i);
+            return (
+              <Fragment key={traitKey(t)}>
+                {divider && <BandDivider band={divider} />}
+                <SortableTraitRow
+                  trait={t}
+                  band={bandForRank(t.rank, bands).tier}
+                  onTogglePin={onTogglePin}
+                />
+              </Fragment>
+            );
+          })}
         </div>
       </SortableContext>
     </DndContext>
@@ -231,6 +310,7 @@ export default function ApprovePage() {
 
   // Derived ledger metrics.
   const totalTraits = traits.length;
+  const bands = useMemo(() => computeBands(totalTraits), [totalTraits]);
   const pinnedCount = useMemo(() => traits.filter((t) => t.pinned).length, [traits]);
   const categoryCount = useMemo(() => new Set(traits.map((t) => t.trait_category)).size, [traits]);
   const marketCount = useMemo(() => traits.filter((t) => t.market_norm != null).length, [traits]);
@@ -348,7 +428,8 @@ export default function ApprovePage() {
         <h1 className="al-title">Approve Ranking</h1>
         <p className="al-lede">
           Reorder and pin traits, set the stat-vs-market blend, then wallet-sign the exact ranking your
-          collection will lock on-chain.
+          collection will lock on-chain. Each row shows the atlas band its position lands in — only
+          moves that cross a band divider change which tier a trait belongs to.
         </p>
       </header>
 
@@ -380,6 +461,19 @@ export default function ApprovePage() {
                 label="Market signal"
                 value={hasMarket ? `${marketCount}/${totalTraits}` : "none"}
               />
+            </div>
+            <div className="al-bands">
+              <span className="al-bands-label">Atlas bands</span>
+              {bands.map((b) => (
+                <span
+                  key={b.tier}
+                  className="al-bands-item"
+                  style={{ "--band-color": TIER_COLOR[b.tier] } as React.CSSProperties}
+                  title={`Ranks ${b.start + 1}–${b.end} (top ${Math.round(CUMULATIVE_PCT[b.tier] * 100)}% of traits)`}
+                >
+                  {b.tier} <b>{b.end - b.start}</b>
+                </span>
+              ))}
             </div>
           </section>
 
@@ -462,11 +556,21 @@ export default function ApprovePage() {
             ) : filtering ? (
               <div className="al-trait-list">
                 {visible.map((t) => (
-                  <StaticTraitRow key={traitKey(t)} trait={t} onTogglePin={togglePin} />
+                  <StaticTraitRow
+                    key={traitKey(t)}
+                    trait={t}
+                    band={bandForRank(t.rank, bands).tier}
+                    onTogglePin={togglePin}
+                  />
                 ))}
               </div>
             ) : (
-              <TraitDndList traits={traits} onDragEnd={handleDragEnd} onTogglePin={togglePin} />
+              <TraitDndList
+                traits={traits}
+                bands={bands}
+                onDragEnd={handleDragEnd}
+                onTogglePin={togglePin}
+              />
             )}
           </section>
 

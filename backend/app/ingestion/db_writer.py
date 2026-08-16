@@ -15,6 +15,7 @@ def upsert_tokens(db: Session, tokens: list[dict]) -> None:
         set_={
             "owner_address": stmt.excluded.owner_address,
             "snapshot_block": stmt.excluded.snapshot_block,
+            "image_url": stmt.excluded.image_url,
         },
     )
     db.execute(stmt)

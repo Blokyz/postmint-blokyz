@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     # Pause between Moralis requests. Default matches the free tier (40 req/s);
     # lower it (or set 0) on paid plans via MORALIS_RATE_SLEEP in .env.
     moralis_rate_sleep: float = 0.025
+    # OpenSea v2 API key for the tier-gallery listings intersect (app/opensea.py).
+    # EMPTY = listings layer off (gallery still renders from the DB). OpenSea has
+    # no testnet API, so this only ever matters for mainnet collections.
+    opensea_api_key: str = ""
     base_sepolia_rpc_url: str = "https://sepolia.base.org"
     # Browser origins allowed to call the API (comma-separated). Defaults cover the
     # Next.js dev server reached via either hostname or alternate dev port 3001.

@@ -2,13 +2,15 @@
 
 import { displayFont, bodyFont } from "@/lib/fonts";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useAccount } from "wagmi";
 import { Crest } from "@/components/Crest";
 import { InfoTip } from "@/components/InfoTip";
 import { WalletAvatar } from "@/components/WalletAvatar";
 import { apiGet, shortAddr } from "@/lib/api";
 import { useCollection } from "@/lib/collection";
+import { tierMeta } from "@/lib/crests";
 
 const display = displayFont;
 const mono = bodyFont;
@@ -41,14 +43,32 @@ function tierCounts(tiers: string[]): Record<string, number> {
   return counts;
 }
 
+// useSearchParams requires a Suspense boundary at build time.
 export default function StandingsPage() {
+  return (
+    <Suspense fallback={null}>
+      <StandingsInner />
+    </Suspense>
+  );
+}
+
+function StandingsInner() {
   const { slug, contract_address, display_name } = useCollection();
   const contract = contract_address;
   const { address } = useAccount();
   const me = address?.toLowerCase();
+  const router = useRouter();
+
+  // The active tab lives in the URL (?tab=tiers) so navigating into a tier page
+  // and coming BACK restores the Tiers view instead of resetting to Standings.
+  const tab: "standings" | "tiers" =
+    useSearchParams().get("tab") === "tiers" ? "tiers" : "standings";
+  const setTab = (t: "standings" | "tiers") =>
+    router.replace(t === "tiers" ? `/c/${slug}/standings?tab=tiers` : `/c/${slug}/standings`, {
+      scroll: false,
+    });
 
   const [data, setData] = useState<Standings | null>(null);
-  const [tab, setTab] = useState<"standings" | "tiers">("standings");
   const [query, setQuery] = useState("");
   const [show, setShow] = useState(25);
   const [error, setError] = useState<string | null>(null);
@@ -196,7 +216,12 @@ export default function StandingsPage() {
             const pct = t.cap > 0 ? Math.min(100, (t.slots_filled / t.cap) * 100) : 0;
             const state = t.slots_remaining <= 0 ? "won" : t.racers > 0 ? "racing" : "qualified";
             return (
-              <article key={t.tier} className="cb-tiercard">
+              <Link
+                key={t.tier}
+                href={`/c/${slug}/tiers/${t.tier.toLowerCase().replace(/\s+/g, "-")}`}
+                className="cb-tiercard"
+                style={{ "--tier-color": tierMeta(t.tier, t.rank).color } as React.CSSProperties}
+              >
                 <Crest tier={t.tier} state={state} size={72} rank={t.rank} progressPct={pct} />
                 <div className="cb-tierbody">
                   <div className="cb-tiertop">
@@ -209,8 +234,9 @@ export default function StandingsPage() {
                   <div className="cb-tiermeta">
                     <b>{t.slots_filled}</b> / {t.cap} secured · {t.slots_remaining} open · {t.racers} racing
                   </div>
+                  <span className="cb-tierview">View qualifying NFTs →</span>
                 </div>
-              </article>
+              </Link>
             );
           })}
         </section>

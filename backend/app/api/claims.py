@@ -38,7 +38,13 @@ from app.api.schemas import (
 from app.api.auth import require_operator_token
 from app.claim_signing import backend_signer_address, sign_claim_attestation
 from app.claims.acquisitions import oldest_qualifying_set
-from app.claims.eligibility import evaluate_wallet, find_tier_entry, shopping_guidance_for_wallet
+from app.atlas.pools import pool_token_ids
+from app.claims.eligibility import (
+    evaluate_wallet,
+    find_tier_entry,
+    tier_exclude_pairs,
+    tier_pool_pairs,
+)
 from app.claims.onchain import ClaimVerificationError, ReceiptNotFound, verify_claim_tx
 from app.claims.reconcile import NoSeason, reconcile_claims
 from app.claims.seasons import allocate_nonce, latest_season, record_season
@@ -49,9 +55,10 @@ from app.claims.windows import (
     window_status,
 )
 from app.config import get_settings
-from app.db.models import Claim, Collection
+from app.db.models import Claim, Collection, Token, Trait
 from app.db.session import get_db
 from app.manifests import load_atlas_manifest
+from app import opensea
 from app.ttl_cache import contract_keys, race_cache
 
 router = APIRouter(tags=["claims"])
@@ -92,7 +99,7 @@ def _active_claim(db: Session, contract: str, tier: str, wallet: str, for_update
 
 
 def _collection_chain(db: Session, contract: str) -> str:
-    """Source chain for Moralis lookups (acquisition backfill, shopping links)."""
+    """Source chain for Moralis lookups (acquisition backfill)."""
     col = db.scalar(select(Collection).where(Collection.contract_address == contract.lower()))
     return col.chain if col else "eth"
 
@@ -108,15 +115,82 @@ def eligibility(contract: str, wallet: str, db: Session = Depends(get_db)) -> di
     return {"contract_address": contract.lower(), "wallet_address": wallet.lower(), "tiers": tiers}
 
 
-@router.get("/eligibility/{contract}/{wallet}/shopping")
-def shopping_guidance(contract: str, wallet: str, db: Session = Depends(get_db)) -> dict:
-    """Shopping guidance for short tiers: returns missing count, commoner-first pool traits,
-    unowned candidate token IDs, and cross-tier impact."""
-    manifest = _require_manifest(contract)
-    return shopping_guidance_for_wallet(
-        db, contract, wallet, manifest, chain=_collection_chain(db, contract)
-    )
 
+@router.get("/gallery/{contract}/{tier}")
+def tier_gallery(
+    contract: str,
+    tier: str,
+    db: Session = Depends(get_db),
+    limit: int = Query(24, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> dict:
+    """Public per-tier token gallery (the /c/{slug}/tiers/{tier} page): the NFTs
+    that qualify for this tier (exclusive bands honored via `pool_exclude`) with
+    their traits, OpenSea listings intersected when available. Ordering is
+    listed-cheapest first, then the unlisted pool by token id; `offset`/`limit`
+    page over that ordering (listings refresh every ~60s, so a page boundary can
+    shift slightly between requests — fine for a browse surface)."""
+    manifest = _require_manifest(contract)
+    # Accept slug-style tier names ("super-rare") alongside exact ones
+    # ("Super Rare") so the frontend can build space-free URLs.
+    entry = find_tier_entry(manifest, tier)
+    if entry is None:
+        want = tier.replace("-", " ").lower()
+        entry = next(
+            (t for t in manifest.get("tiers", []) if (t.get("tier") or "").lower() == want),
+            None,
+        )
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Unknown tier '{tier}'.")
+    tier = entry.get("tier") or tier  # canonical name in the response
+    contract_lc = contract.lower()
+    ids = pool_token_ids(db, contract_lc, tier_pool_pairs(entry), tier_exclude_pairs(entry))
+    chain = _collection_chain(db, contract)
+    listings_supported = bool(settings.opensea_api_key) and opensea.opensea_chain(chain) is not None
+
+    prices = opensea.listed_prices(contract_lc, chain) if listings_supported else {}
+    id_set = set(ids)
+    listed = sorted(((t, p) for t, p in prices.items() if t in id_set), key=lambda x: x[1])
+    listed_ids = [t for t, _ in listed]
+    ordered = listed_ids + [t for t in ids if t not in prices]
+    chosen = ordered[offset : offset + limit]
+
+    images: dict[int, str | None] = {}
+    traits: dict[int, list[dict]] = {}
+    if chosen:
+        images = dict(
+            db.execute(
+                select(Token.token_id, Token.image_url)
+                .where(Token.contract_address == contract_lc)
+                .where(Token.token_id.in_(chosen))
+            ).all()
+        )
+        for tid, cat, val in db.execute(
+            select(Trait.token_id, Trait.trait_category, Trait.trait_value)
+            .where(Trait.contract_address == contract_lc)
+            .where(Trait.token_id.in_(chosen))
+            .order_by(Trait.trait_category)
+        ).all():
+            traits.setdefault(tid, []).append({"trait_category": cat, "trait_value": val})
+    price_map = dict(listed)
+    return {
+        "contract_address": contract_lc,
+        "tier": tier,
+        "pool_size": len(ids),
+        "listed_count": len(listed),
+        "listings_supported": listings_supported,
+        "offset": offset,
+        "tokens": [
+            {
+                "token_id": t,
+                "image_url": images.get(t),
+                "price_eth": price_map.get(t),
+                "opensea_url": opensea.asset_url(chain, contract_lc, t),
+                "traits": traits.get(t, []),
+            }
+            for t in chosen
+        ],
+    }
 
 
 @router.get("/standings/{contract}")

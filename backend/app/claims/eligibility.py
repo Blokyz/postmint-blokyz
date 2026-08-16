@@ -23,9 +23,10 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 
-from sqlalchemy import func, select, tuple_
+from sqlalchemy import select, tuple_
 from sqlalchemy.orm import Session
 
+from app.atlas.pools import excluded_token_ids_subq
 from app.db.models import Claim, Token, Trait
 
 Pool = list[tuple[str, str]]
@@ -74,6 +75,14 @@ def tier_pool_pairs(tier_entry: dict) -> Pool:
     return []
 
 
+def tier_exclude_pairs(tier_entry: dict) -> Pool:
+    """Rarer-band trait pairs excluded from a tier (exclusive tier bands,
+    Option A 2026-08-13). Tokens carrying any of these belong to a rarer tier.
+    Old manifests without `set_rule.pool_exclude` return [] — old behavior."""
+    rule = tier_entry.get("set_rule") or {}
+    return _pool_pairs(rule.get("pool_exclude") or [])
+
+
 def consumed_token_ids(db: Session, contract: str, tier: str) -> set[int]:
     """Token ids already spent on a WON claim in this tier — by ANY wallet, so
     consumption follows the token across transfers. Only confirmed wins consume
@@ -90,15 +99,18 @@ def consumed_token_ids(db: Session, contract: str, tier: str) -> set[int]:
     return used
 
 
-def matching_token_ids(db: Session, contract: str, wallet: str, pool: Pool) -> list[int]:
-    """Token ids currently owned by `wallet` that carry at least one trait in `pool`.
+def matching_token_ids(
+    db: Session, contract: str, wallet: str, pool: Pool, exclude_pool: Pool | None = None
+) -> list[int]:
+    """Token ids currently owned by `wallet` that carry at least one trait in `pool`
+    (and, when `exclude_pool` is given, no trait in it — exclusive tier bands).
 
     Contract + owner are stored lowercased (see ingestion), so inputs are lowered
     to match. Returns a sorted, de-duplicated list.
     """
     if not pool:
         return []
-    rows = db.execute(
+    stmt = (
         select(Trait.token_id)
         .distinct()
         .join(
@@ -108,7 +120,12 @@ def matching_token_ids(db: Session, contract: str, wallet: str, pool: Pool) -> l
         .where(Token.contract_address == contract.lower())
         .where(Token.owner_address == wallet.lower())
         .where(tuple_(Trait.trait_category, Trait.trait_value).in_(pool))
-    ).all()
+    )
+    if exclude_pool:
+        stmt = stmt.where(
+            Trait.token_id.not_in(excluded_token_ids_subq(contract.lower(), exclude_pool))
+        )
+    rows = db.execute(stmt).all()
     return sorted(r[0] for r in rows)
 
 
@@ -121,7 +138,9 @@ def evaluate_tier(db: Session, contract: str, wallet: str, tier_entry: dict) -> 
     if archetype in ("count_of_pool", "apex_combo"):
         pool = _pool_pairs(rule.get("pool") or [])
         count_required = int(rule.get("count_required") or 0)
-        token_ids = matching_token_ids(db, contract, wallet, pool)
+        token_ids = matching_token_ids(
+            db, contract, wallet, pool, exclude_pool=tier_exclude_pairs(tier_entry)
+        )
         used = consumed_token_ids(db, contract, tier)
         if used:
             token_ids = [t for t in token_ids if t not in used]
@@ -168,101 +187,3 @@ def find_tier_entry(atlas_manifest: dict, tier: str) -> dict | None:
         if t.get("tier") == tier:
             return t
     return None
-
-
-def unowned_candidate_tokens(
-    db: Session, contract: str, wallet: str, pool: Pool, sample_size: int = 10
-) -> list[int]:
-    """Token IDs carrying at least one trait in `pool` NOT owned by `wallet`."""
-    if not pool:
-        return []
-    rows = db.execute(
-        select(Trait.token_id)
-        .distinct()
-        .join(
-            Token,
-            (Token.contract_address == Trait.contract_address) & (Token.token_id == Trait.token_id),
-        )
-        .where(Token.contract_address == contract.lower())
-        .where((Token.owner_address.is_(None)) | (Token.owner_address != wallet.lower()))
-        .where(tuple_(Trait.trait_category, Trait.trait_value).in_(pool))
-        .limit(sample_size)
-    ).all()
-    return sorted(r[0] for r in rows)
-
-
-def pool_traits_with_rarity(db: Session, contract: str, pool: Pool) -> list[dict]:
-    """Pool traits sorted by occurrence count descending (commoner first ≈ lower price floor)."""
-    if not pool:
-        return []
-    rows = db.execute(
-        select(Trait.trait_category, Trait.trait_value, func.count(Trait.token_id).label("token_count"))
-        .where(Trait.contract_address == contract.lower())
-        .where(tuple_(Trait.trait_category, Trait.trait_value).in_(pool))
-        .group_by(Trait.trait_category, Trait.trait_value)
-    ).all()
-
-    counts = {(c, v): cnt for c, v, cnt in rows}
-    return sorted(
-        ({"trait_category": c, "trait_value": v, "token_count": counts.get((c, v), 0)} for c, v in pool),
-        key=lambda x: x["token_count"],
-        reverse=True,
-    )
-
-
-def shopping_guidance_for_wallet(
-    db: Session, contract: str, wallet: str, atlas_manifest: dict, chain: str = "eth"
-) -> dict:
-    """Level A shopping guidance: for each short tier, provides needed count,
-    commoner-first qualifying pool traits, unowned candidate tokens, and cross-tier impact."""
-    all_elig = evaluate_wallet(db, contract, wallet, atlas_manifest)
-    short_tiers_elig = [e for e in all_elig if e.needed > 0 and e.count_required > 0]
-
-    tier_pools: dict[str, set[tuple[str, str]]] = {
-        t.get("tier", ""): set(tier_pool_pairs(t)) for t in atlas_manifest.get("tiers", [])
-    }
-
-    short_results = []
-    for elig in short_tiers_elig:
-        pool = list(tier_pools.get(elig.tier, set()))
-        sorted_pool = pool_traits_with_rarity(db, contract, pool)
-        candidates = unowned_candidate_tokens(db, contract, wallet, pool, sample_size=10)
-
-        cross_impact = []
-        for other in short_tiers_elig:
-            if other.tier == elig.tier:
-                continue
-            other_pool = tier_pools.get(other.tier, set())
-            overlap = set(pool) & other_pool
-            if overlap:
-                projected_add = min(elig.needed, other.needed)
-                projected_held = min(other.count_required, other.held_count + projected_add)
-                projected_pct = round(min(100.0, projected_held / other.count_required * 100.0), 2)
-                if projected_pct > other.progress_pct:
-                    cross_impact.append({
-                        "tier": other.tier,
-                        "current_progress_pct": other.progress_pct,
-                        "projected_progress_pct": projected_pct,
-                        "current_needed": other.needed,
-                        "projected_needed": max(0, other.count_required - projected_held),
-                    })
-
-        short_results.append({
-            "tier": elig.tier,
-            "archetype": elig.archetype,
-            "needed": elig.needed,
-            "held_count": elig.held_count,
-            "count_required": elig.count_required,
-            "progress_pct": elig.progress_pct,
-            "pool_traits": sorted_pool,
-            "candidate_token_ids": candidates,
-            "cross_tier_impact": cross_impact,
-        })
-
-    return {
-        "contract_address": contract.lower(),
-        "wallet_address": wallet.lower(),
-        "chain": chain,
-        "short_tiers": short_results,
-    }
-

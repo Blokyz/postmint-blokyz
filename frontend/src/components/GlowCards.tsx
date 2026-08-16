@@ -9,7 +9,8 @@
 
 import { useEffect } from "react";
 
-const GLOW_SELECTOR = ".bento-card, .dir-card, .studio-stage, .studio-row, .atlas-tier";
+const GLOW_SELECTOR =
+  ".bento-card, .dir-card, .studio-stage, .studio-row, .atlas-tier, .cb-tiercard, .cb-tiergal-item";
 
 export function GlowCards() {
   useEffect(() => {

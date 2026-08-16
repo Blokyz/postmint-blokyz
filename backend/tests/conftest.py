@@ -4,6 +4,9 @@ import os
 os.environ["DATABASE_URL"] = "postgresql://postmint:postmint@localhost:15432/postmint_test"
 os.environ["REDIS_URL"] = "redis://localhost:6379/1"
 os.environ["MORALIS_API_KEY"] = "test-key-fake"
+# Force the OpenSea listings layer OFF regardless of the developer's .env —
+# gallery tests must never hit the real API (they monkeypatch instead).
+os.environ["OPENSEA_API_KEY"] = ""
 # Disable the standings/directory rollup cache so directly-seeded rows are
 # always visible; cache behavior itself is covered by test_ttl_cache.py.
 os.environ["STANDINGS_CACHE_TTL_SECONDS"] = "0"

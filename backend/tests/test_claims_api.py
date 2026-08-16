@@ -109,21 +109,6 @@ def test_eligibility_404_without_manifest(client):
     assert r.status_code == 404
 
 
-def test_shopping_guidance_endpoint(client, db, atlas_file):
-    atlas_file(count_required=3)
-    _seed_holdings(db, 1)
-    r = client.get(f"/eligibility/{CONTRACT}/{WALLET}/shopping")
-    assert r.status_code == 200
-    data = r.json()
-    assert data["contract_address"] == CONTRACT
-    assert len(data["short_tiers"]) == 1
-    short = data["short_tiers"][0]
-    assert short["tier"] == TIER
-    assert short["needed"] == 2
-    assert len(short["pool_traits"]) > 0
-
-
-
 # --- derived window status ---
 
 

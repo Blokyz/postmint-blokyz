@@ -48,6 +48,15 @@ def generate_atlas_manifest(
     }
     bands = slice_into_tiers(ranking_manifest["trait_rankings"])
 
+    # Exclusive tier bands (Option A, 2026-08-13): each tier excludes tokens
+    # carrying any trait from a RARER band, so a token belongs only to its
+    # rarest trait's tier. TIER_ORDER is rarest -> common; accumulate as we go.
+    exclude_by_tier: dict[str, list[dict]] = {}
+    rarer: list[dict] = []
+    for tier in TIER_ORDER:
+        exclude_by_tier[tier] = list(rarer)
+        rarer.extend(bands[tier])
+
     tiers = []
     for tier in TIER_OUTPUT_ORDER:
         cfg = tier_structure[tier]
@@ -55,6 +64,7 @@ def generate_atlas_manifest(
             build_tier(
                 tier, bands[tier], cfg["cap"], db, contract_address,
                 count_required=cfg.get("count_required"),
+                exclude_traits=exclude_by_tier[tier],
             )
         )
 

@@ -44,6 +44,7 @@ _PAGE_ONE = {
             "owner_of": "0xOwnerA",
             "block_number": "21000000",
             "metadata": json.dumps({
+                "image": "ipfs://QmHash/1.png",
                 "attributes": [
                     {"trait_type": "Fur", "value": "Solid Gold"},
                     {"trait_type": "Background", "value": "Blue"},
@@ -109,6 +110,18 @@ def test_missing_block_becomes_none():
     with patch("httpx.get", return_value=_mock_resp(_LAST_PAGE)):
         page = fetch_nft_page(_CONTRACT, "eth", _API_KEY)
     assert page.tokens[0]["snapshot_block"] is None
+
+
+def test_image_url_captured_from_metadata():
+    with patch("httpx.get", return_value=_mock_resp(_PAGE_ONE)):
+        page = fetch_nft_page(_CONTRACT, "eth", _API_KEY)
+    assert page.tokens[0]["image_url"] == "ipfs://QmHash/1.png"
+
+
+def test_missing_image_becomes_none():
+    with patch("httpx.get", return_value=_mock_resp(_PAGE_ONE)):
+        page = fetch_nft_page(_CONTRACT, "eth", _API_KEY)
+    assert page.tokens[1]["image_url"] is None  # metadata without an image key
 
 
 def test_contract_address_lowercased_in_token():

@@ -4,11 +4,14 @@ from sqlalchemy.orm import Session
 
 from app.api.schemas import (
     AtlasGenerateRequest,
+    BandPreviewRequest,
     LockAttestationRequest,
     LockAttestationResponse,
 )
 from app.attestation import backend_signer_address, sign_lock_attestation
+from app.atlas.bands import TIER_ORDER, slice_into_tiers
 from app.atlas.generator import generate_atlas_manifest
+from app.atlas.pools import rarest_trait_token_counts
 from app.config import get_settings
 from app.db.models import IngestJob
 from app.db.session import get_db
@@ -56,6 +59,36 @@ def generate(req: AtlasGenerateRequest, db: Session = Depends(get_db)) -> dict:
     atlas_manifest = generate_atlas_manifest(db, req.contract_address, ranking_manifest, tier_structure)
     write_atlas_manifest(req.contract_address, atlas_manifest)
     return atlas_manifest
+
+
+@router.post("/band-preview/{contract}")
+def band_preview(contract: str, req: BandPreviewRequest, db: Session = Depends(get_db)) -> dict:
+    """Band boundaries for an arbitrary trait ordering (rarest first) — the
+    approve page calls this on reorder/re-blend so its band chips match exactly
+    what /atlas/generate would cut. Public read: trait data is public anyway."""
+    contract = contract.strip().lower()
+    ordered = [(t.trait_category, t.trait_value) for t in req.order]
+    marginal = rarest_trait_token_counts(db, contract, ordered)
+    rankings = [
+        {"rank": i + 1, "trait_category": c, "trait_value": v}
+        for i, (c, v) in enumerate(ordered)
+    ]
+    tiers = slice_into_tiers(rankings, marginal)
+    total = sum(marginal.values())
+
+    bands, start = [], 0
+    for tier in TIER_ORDER:
+        traits = tiers[tier]
+        tokens = sum(marginal[(t["trait_category"], t["trait_value"])] for t in traits)
+        bands.append({
+            "tier": tier,
+            "start": start,
+            "end": start + len(traits),
+            "tokens": tokens,
+            "pct": round(100 * tokens / total, 1) if total else 0.0,
+        })
+        start += len(traits)
+    return {"bands": bands, "total_tokens": total}
 
 
 @router.get("/preview/{contract}")

@@ -141,6 +141,12 @@ class TierOverride(BaseModel):
     count_required: int | None = Field(default=None, ge=1, le=20)
 
 
+class BandPreviewRequest(BaseModel):
+    # The approve page's current drag order, rarest first. TraitApproval's
+    # `pinned` default makes it a plain (category, value) pair list here.
+    order: list[TraitApproval]
+
+
 class AtlasGenerateRequest(BaseModel):
     contract_address: str
     tier_structure: dict[str, TierOverride] | None = None

@@ -98,6 +98,36 @@ def wallet_counts_for_pool(
     return {row[0]: row[1] for row in rows}
 
 
+def rarest_trait_token_counts(
+    db: Session, contract: str, ordered_pool: Pool
+) -> dict[tuple[str, str], int]:
+    """Map each trait pair -> count of tokens whose RAREST trait it is, under
+    the rarity order given by `ordered_pool` (index 0 = rarest).
+
+    This is the token-mass each trait contributes to its band under exclusive
+    bands (Option A): a token counts toward exactly one trait — its first in
+    the ordering. Tokens carrying none of the listed traits count nowhere.
+    Used by bands.slice_into_tiers to place token-share cut points."""
+    order = {pair: i for i, pair in enumerate(ordered_pool)}
+    best: dict[int, int] = {}
+    rows = db.execute(
+        select(Trait.token_id, Trait.trait_category, Trait.trait_value).where(
+            Trait.contract_address == contract
+        )
+    )
+    for token_id, cat, val in rows:
+        idx = order.get((cat, val))
+        if idx is None:
+            continue
+        cur = best.get(token_id)
+        if cur is None or idx < cur:
+            best[token_id] = idx
+    counts: dict[tuple[str, str], int] = {pair: 0 for pair in ordered_pool}
+    for idx in best.values():
+        counts[ordered_pool[idx]] += 1
+    return counts
+
+
 def wallet_owners_for_trait(db: Session, contract: str, category: str, value: str) -> set[str]:
     """Set of wallet addresses holding >=1 token with this trait pair."""
     rows = db.execute(

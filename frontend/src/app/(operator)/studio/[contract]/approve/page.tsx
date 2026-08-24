@@ -64,17 +64,9 @@ function traitKey(t: { trait_category: string; trait_value: string }): string {
   return `${t.trait_category}::${t.trait_value}`;
 }
 
-// Atlas band preview — mirrors TIER_ORDER + CUMULATIVE_PCT in
-// backend/app/atlas/bands.py (keep in lockstep): the atlas slices THIS ranking
-// at ceil(n * pct) cumulative cuts, so a trait's list position decides its band.
-const TIER_ORDER = ["Mythic", "Super Rare", "Rare", "Uncommon", "Common"] as const;
-const CUMULATIVE_PCT: Record<string, number> = {
-  Mythic: 0.07,
-  "Super Rare": 0.15,
-  Rare: 0.3,
-  Uncommon: 0.5,
-  Common: 1.0,
-};
+// Atlas band preview — boundaries come from POST /atlas/band-preview (token-share
+// cuts, 2026-08-18): the backend slices THIS ordering exactly as /atlas/generate
+// would, so there is no client-side mirror of the cut logic to keep in lockstep.
 const TIER_COLOR: Record<string, string> = {
   Mythic: "#ffd23f",
   "Super Rare": "#8b6df0",
@@ -83,23 +75,15 @@ const TIER_COLOR: Record<string, string> = {
   Common: "#7c8aa3",
 };
 
-type Band = { tier: string; start: number; end: number }; // ranks [start+1, end]
+// ranks [start+1, end]; tokens/pct = NFTs whose rarest trait falls in the band
+type Band = { tier: string; start: number; end: number; tokens: number; pct: number };
 
-function computeBands(n: number): Band[] {
-  let prev = 0;
-  return TIER_ORDER.map((tier) => {
-    const end = Math.min(n, Math.ceil(n * CUMULATIVE_PCT[tier]));
-    const band = { tier, start: prev, end };
-    prev = end;
-    return band;
-  });
-}
-
-function bandForRank(rank: number, bands: Band[]): Band {
-  return bands.find((b) => rank <= b.end) ?? bands[bands.length - 1];
+function bandForRank(rank: number, bands: Band[]): string {
+  return (bands.find((b) => rank <= b.end) ?? bands[bands.length - 1])?.tier ?? "";
 }
 
 function BandChip({ tier }: { tier: string }) {
+  if (!tier) return null; // band preview not loaded yet
   const color = TIER_COLOR[tier] ?? "#7c8aa3";
   return (
     <span className="al-band" style={{ "--band-color": color } as React.CSSProperties}>
@@ -110,12 +94,12 @@ function BandChip({ tier }: { tier: string }) {
 
 function BandDivider({ band }: { band: Band }) {
   const color = TIER_COLOR[band.tier] ?? "#7c8aa3";
-  const pct = Math.round(CUMULATIVE_PCT[band.tier] * 100);
   return (
     <div className="al-band-divider" style={{ "--band-color": color } as React.CSSProperties}>
       <span className="al-band-divider-name">{band.tier}</span>
       <span className="al-band-divider-meta">
-        ranks {band.start + 1}–{band.end} · top {pct}% · {band.end - band.start} traits
+        ranks {band.start + 1}–{band.end} · {band.tokens.toLocaleString()} NFTs ({band.pct}%) ·{" "}
+        {band.end - band.start} traits
       </span>
     </div>
   );
@@ -270,7 +254,7 @@ function TraitDndList({
                 {divider && <BandDivider band={divider} />}
                 <SortableTraitRow
                   trait={t}
-                  band={bandForRank(t.rank, bands).tier}
+                  band={bandForRank(t.rank, bands)}
                   onTogglePin={onTogglePin}
                 />
               </Fragment>
@@ -310,7 +294,37 @@ export default function ApprovePage() {
 
   // Derived ledger metrics.
   const totalTraits = traits.length;
-  const bands = useMemo(() => computeBands(totalTraits), [totalTraits]);
+
+  // Band boundaries come from the backend (token-share cuts) — refetch when the
+  // ORDER changes (drag/re-blend), debounced. Pin toggles don't move boundaries,
+  // so the dep is the order key, not the traits array. On failure keep the last
+  // known bands (chips just go briefly stale, never wrong-by-design).
+  const [bands, setBands] = useState<Band[]>([]);
+  const orderKey = useMemo(() => traits.map(traitKey).join("|"), [traits]);
+  useEffect(() => {
+    if (traits.length === 0) {
+      setBands([]);
+      return;
+    }
+    const order = traits.map((t) => ({
+      trait_category: t.trait_category,
+      trait_value: t.trait_value,
+    }));
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API_URL}/atlas/band-preview/${contract}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order }),
+        });
+        if (res.ok) setBands((await res.json()).bands);
+      } catch {
+        /* keep last bands */
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderKey, contract]);
   const pinnedCount = useMemo(() => traits.filter((t) => t.pinned).length, [traits]);
   const categoryCount = useMemo(() => new Set(traits.map((t) => t.trait_category)).size, [traits]);
   const marketCount = useMemo(() => traits.filter((t) => t.market_norm != null).length, [traits]);
@@ -469,7 +483,7 @@ export default function ApprovePage() {
                   key={b.tier}
                   className="al-bands-item"
                   style={{ "--band-color": TIER_COLOR[b.tier] } as React.CSSProperties}
-                  title={`Ranks ${b.start + 1}–${b.end} (top ${Math.round(CUMULATIVE_PCT[b.tier] * 100)}% of traits)`}
+                  title={`Ranks ${b.start + 1}–${b.end} · ${b.end - b.start} traits · ${b.tokens.toLocaleString()} NFTs (${b.pct}% of supply)`}
                 >
                   {b.tier} <b>{b.end - b.start}</b>
                 </span>
@@ -559,7 +573,7 @@ export default function ApprovePage() {
                   <StaticTraitRow
                     key={traitKey(t)}
                     trait={t}
-                    band={bandForRank(t.rank, bands).tier}
+                    band={bandForRank(t.rank, bands)}
                     onTogglePin={togglePin}
                   />
                 ))}

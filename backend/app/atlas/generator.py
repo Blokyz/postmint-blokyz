@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.atlas.bands import TIER_ORDER, slice_into_tiers
+from app.atlas.pools import rarest_trait_token_counts
 from app.atlas.rules import DEFAULT_COUNT_BY_TIER, build_tier, detect_ladders
 
 # Default tier structure (cap, holding_window_hours, count_required) —
@@ -46,7 +47,16 @@ def generate_atlas_manifest(
         tier: {**defaults, **overrides.get(tier, {})}
         for tier, defaults in DEFAULT_TIER_STRUCTURE.items()
     }
-    bands = slice_into_tiers(ranking_manifest["trait_rankings"])
+    # Token-share band cuts (2026-08-18): cut points come from each trait's
+    # marginal token count (tokens whose rarest trait it is) so tier sizes hit
+    # TOKEN_CUMULATIVE_PCT regardless of the collection's traits-per-token.
+    rankings = ranking_manifest["trait_rankings"]
+    ordered = [
+        (r["trait_category"], r["trait_value"])
+        for r in sorted(rankings, key=lambda r: r["rank"])
+    ]
+    marginal = rarest_trait_token_counts(db, contract_address, ordered)
+    bands = slice_into_tiers(rankings, marginal)
 
     # Exclusive tier bands (Option A, 2026-08-13): each tier excludes tokens
     # carrying any trait from a RARER band, so a token belongs only to its

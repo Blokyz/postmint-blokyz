@@ -6,7 +6,12 @@ import pytest
 
 from app.atlas.bands import TIER_ORDER, slice_into_tiers
 from app.atlas.generator import DEFAULT_TIER_STRUCTURE, TIER_OUTPUT_ORDER
-from app.atlas.pools import pool_token_count, wallet_counts_for_pool, wallet_owners_for_trait
+from app.atlas.pools import (
+    pool_token_count,
+    rarest_trait_token_counts,
+    wallet_counts_for_pool,
+    wallet_owners_for_trait,
+)
 from app.atlas.rules import build_tier, detect_ladders, feasibility
 from app.db.models import IngestJob, Token, Trait
 from app.manifests import load_atlas_manifest, write_ranking_manifest
@@ -46,6 +51,34 @@ def test_slice_into_tiers_small_n():
 def test_slice_into_tiers_empty():
     tiers = slice_into_tiers([])
     assert all(v == [] for v in tiers.values())
+
+
+def test_slice_into_tiers_token_cuts():
+    # Marginal token masses shaped exactly like the 1/4/10/25/60 pyramid: each
+    # tier should close on its trait; zero-mass tail traits sweep into Common.
+    ranked = _ranked(10)
+    masses = [1, 4, 10, 25, 60, 0, 0, 0, 0, 0]
+    marginal = {("Trait", f"v{i+1}"): m for i, m in enumerate(masses)}
+    tiers = slice_into_tiers(ranked, marginal)
+    sizes = {t: len(v) for t, v in tiers.items()}
+    assert sizes == {"Mythic": 1, "Super Rare": 1, "Rare": 1, "Uncommon": 1, "Common": 6}
+    all_ranks = [t["rank"] for tier in TIER_ORDER for t in tiers[tier]]
+    assert all_ranks == list(range(1, 11))
+
+
+def test_slice_into_tiers_token_cuts_mega_trait_lands_in_mythic():
+    # A first trait covering 30% of tokens overshoots the 1% target but must
+    # still land in Mythic (a band never stays empty while traits remain).
+    ranked = _ranked(2)
+    marginal = {("Trait", "v1"): 30, ("Trait", "v2"): 70}
+    tiers = slice_into_tiers(ranked, marginal)
+    assert [t["rank"] for t in tiers["Mythic"]] == [1]
+    assert [t["rank"] for t in tiers["Super Rare"]] == [2]
+
+
+def test_slice_into_tiers_zero_token_data_falls_back_to_trait_cuts():
+    marginal = {("Trait", f"v{i+1}"): 0 for i in range(1000)}
+    assert slice_into_tiers(_ranked(1000), marginal) == slice_into_tiers(_ranked(1000))
 
 
 # ── pools.py ─────────────────────────────────────────────────────────────────
@@ -97,6 +130,24 @@ def test_wallet_owners_for_trait(db):
     assert wallet_owners_for_trait(db, _CONTRACT, "Background", "Red") == {"0xA", "0xB"}
     assert wallet_owners_for_trait(db, _CONTRACT, "Eyes", "Laser") == {"0xA"}
     assert wallet_owners_for_trait(db, _CONTRACT, "Eyes", "Nonexistent") == set()
+
+
+def test_rarest_trait_token_counts_follows_order(db):
+    # tok1 carries A+B, tok2 only B, tok3 only C — each token counts toward
+    # exactly one trait: its first in the given order.
+    _add_token(db, 1, "0xA")
+    _add_trait(db, 1, "Fur", "A")
+    _add_trait(db, 1, "Hat", "B")
+    _add_token(db, 2, "0xB")
+    _add_trait(db, 2, "Hat", "B")
+    _add_token(db, 3, "0xC")
+    _add_trait(db, 3, "Fur", "C")
+    db.commit()
+
+    a, b, c = ("Fur", "A"), ("Hat", "B"), ("Fur", "C")
+    assert rarest_trait_token_counts(db, _CONTRACT, [a, b, c]) == {a: 1, b: 1, c: 1}
+    # Reversed order: B now outranks A, so tok1's rarest trait becomes B.
+    assert rarest_trait_token_counts(db, _CONTRACT, [c, b, a]) == {c: 1, b: 2, a: 0}
 
 
 # ── rules.feasibility ──────────────────────────────────────────────────────
@@ -312,6 +363,23 @@ def _seed_tokens(db, n_traits: int) -> None:
             _add_token(db, tid, f"0xwallet{tid}")
             _add_trait(db, tid, "Trait", f"v{i+1}")
     db.commit()
+
+
+def test_band_preview_endpoint(client, db):
+    # 20 traits x 2 single-trait tokens each = 40 tokens, uniform marginals.
+    _seed_tokens(db, 20)
+    order = [{"trait_category": "Trait", "trait_value": f"v{i+1}"} for i in range(20)]
+    r = client.post(f"/atlas/band-preview/{_CONTRACT}", json={"order": order})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total_tokens"] == 40
+    bands = body["bands"]
+    assert [b["tier"] for b in bands] == TIER_ORDER
+    # Contiguous full coverage of the 20 traits.
+    assert bands[0]["start"] == 0
+    assert bands[-1]["end"] == 20
+    assert all(bands[i]["end"] == bands[i + 1]["start"] for i in range(len(bands) - 1))
+    assert sum(b["tokens"] for b in bands) == 40
 
 
 def test_atlas_generate_no_completed_job_returns_404(client):
